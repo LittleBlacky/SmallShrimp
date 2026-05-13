@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Session data
+.history/
+.logs
+
+# OS
+.DS_Store
+Thumbs.db
+
+docs/
+
+**/config.user.yaml
+**/config.runtime.yaml
+
+**/uv.lock
+
+# local utils
+compare_folders.py
+generate_diff_md.py
+cleanup_docstrings.py
+compare_steps.py
+generate_diff.sh
+**/DIFF*.md
+.worktrees/
+
+# build time populate
+web/public/steps
+
+# agents
+.agents/
+skills-lock.json
+.claude/
