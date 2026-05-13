@@ -1,0 +1,23 @@
+[project]
+  name = "SmallShrimp"
+  version = "0.1.0"
+  description = ""
+  requires-python = ">=3.11"
+
+  dependencies = [
+      "litellm>=1.0.0",
+      "typer>=0.9.0",
+      "rich>=13.0.0",
+      "pydantic>=2.0.0",
+      "pyyaml>=6.0",
+  ]
+
+  [build-system]
+  requires = ["hatchling"]
+  build-backend = "hatchling.build"
+
+  [tool.hatch.build.targets.wheel]
+  packages = ["src/SmallShrimp"]
+
+  [project.scripts]
+  my-bot = "SmallShrimp.cli.main:app"
