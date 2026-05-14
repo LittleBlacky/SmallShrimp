@@ -8,6 +8,8 @@ from ..core.agent_loader import AgentLoader
 from ..utils.config import Config
 from ..tools.registry import ToolRegistry
 from ..core.history import HistoryManager
+from ..core.commands.registry import CommandRegistry
+from ..core.commands import handlers
 
 console = Console()
 
@@ -67,6 +69,21 @@ async def run_chat_loop() -> None:
             if user_input.lower() in ("quit", "exit", "q"):
                 console.print("\n[bold yellow]Goodbye![/bold yellow]")
                 break
+
+            parsed = CommandRegistry.parse(user_input)
+            if parsed:
+                name, args = parsed
+                cmd = CommandRegistry.get(name)
+                if cmd:
+                    from ..core.commands.handlers import CommandContext
+                    context = CommandContext(session)
+                    response = await cmd.handler(context, args)
+                    console.print(f"\n{response}\n")
+                    continue
+                else:
+                    console.print(f"\n[red]未知命令: /{name}[/red]\n")
+                    continue
+
             if not user_input.strip():
                 continue
             try:
