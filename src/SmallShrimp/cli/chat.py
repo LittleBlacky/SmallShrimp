@@ -37,13 +37,8 @@ async def run_chat_loop() -> None:
 
     # 创建工具注册表并注册内置工具
     from ..tools.registry import ToolRegistry
-    from ..tools.builtin_tools import read, write, glob, grep
 
-    tool_registry = ToolRegistry()
-    tool_registry.register(read)
-    tool_registry.register(write)
-    tool_registry.register(glob)
-    tool_registry.register(grep)
+    tool_registry = ToolRegistry.from_module("SmallShrimp.tools.builtin_tools")
     
     agent = Agent(agent_def, config, tool_registry)
     session = agent.new_session()

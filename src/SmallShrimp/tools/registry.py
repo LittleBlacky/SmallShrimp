@@ -1,5 +1,6 @@
 """工具注册表。"""
 from .base import Tool
+import importlib
 
 class ToolRegistry:
     """管理所有可用工具。"""
@@ -22,6 +23,20 @@ class ToolRegistry:
         """获取所有工具的 schema（供 LLM 使用）。"""
         return [tool.get_schema() for tool in self._tools.values()]
         
+    @classmethod
+    def from_module(cls, module_name: str) -> "ToolRegistry":
+        """从模块自动发现并注册所有 @tool 装饰的工具。"""
+        registry = cls()
+        module = importlib.import_module(module_name)
+
+        for name, obj in vars(module).items():
+            if name.startswith("_"):
+                continue
+            if isinstance(obj, Tool):
+                registry.register(obj)
+
+        return registry
+
     async def execute_tool(self, name: str, **kwargs) -> str:
         """执行工具并返回结果字符串。"""
         tool = self.get(name)
