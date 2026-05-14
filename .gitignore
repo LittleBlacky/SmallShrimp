@@ -45,6 +45,8 @@ docs/
 **/config.user.yaml
 **/config.runtime.yaml
 
+**/sessions/**.json
+
 **/uv.lock
 
 # local utils

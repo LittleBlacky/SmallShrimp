@@ -11,14 +11,16 @@ if TYPE_CHECKING:
     from utils.def_loader import AgentDef
     from utils.config import Config
     from tools.registry import ToolRegistry
-
+    from core.history import HistoryManager
+    
 class Agent:
 
-    def __init__(self, agent_def: "AgentDef", config: "Config", tool_registry: "ToolRegistry") -> None:
+    def __init__(self, agent_def: "AgentDef", config: "Config", tool_registry: "ToolRegistry", history_manager: "HistoryManager") -> None:
         self.agent_def = agent_def
         self.config = config
         self.llm: "LLMProvider" = self._create_llm()
         self.tool_registry = tool_registry
+        self.history_manager = history_manager
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -102,4 +104,5 @@ class AgentSession:
             # 普通回复，结束循环
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
+            self.agent.history_manager.save(self.session_id, self.state.messages)
             return response["content"] or ""

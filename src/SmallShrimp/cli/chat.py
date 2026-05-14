@@ -7,6 +7,7 @@ from ..core.agent import Agent
 from ..core.agent_loader import AgentLoader
 from ..utils.config import Config
 from ..tools.registry import ToolRegistry
+from ..core.history import HistoryManager
 
 console = Console()
 
@@ -35,13 +36,30 @@ async def run_chat_loop() -> None:
     loader = AgentLoader(Path("workspace/agents"))
     agent_def = loader.load("pickle")
 
-    # 创建工具注册表并注册内置工具
-    from ..tools.registry import ToolRegistry
-
+    # 创建工具注册表并注册内置工具    
     tool_registry = ToolRegistry.from_module("SmallShrimp.tools.builtin_tools")
     
-    agent = Agent(agent_def, config, tool_registry)
-    session = agent.new_session()
+    # 历史管理器
+    history_manager = HistoryManager(Path("workspace/sessions"))
+
+    agent = Agent(agent_def, config, tool_registry, history_manager)
+
+    # 询问是否恢复旧会话
+    sessions = history_manager.list_sessions()
+    if sessions:
+        console.print(f"[dim]找到 {len(sessions)} 个历史会话[/dim]")
+        session_id = sessions[0]["session_id"]  # 默认恢复最新的
+        messages = history_manager.load(session_id)
+        console.print(f"[dim]恢复会话: {session_id[:8]}...[/dim]\n")
+    else:
+        session_id = None
+        messages = []
+
+    session = agent.new_session(session_id)
+    
+    if messages:
+        for msg in messages:
+            session.state.messages.append(msg)
 
     try:
         while True:
