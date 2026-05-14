@@ -2,13 +2,13 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
+from core.session_state import SessionState
+from core.message import HumanMessage, AssistantMessage
 
 if TYPE_CHECKING:
     from provider.llm.base import LLMProvider
     from utils.def_loader import AgentDef
     from utils.config import Config
-    from core.session_state import SessionState
-    from core.message import SystemMessage, HumanMessage, AssistantMessage, Message
 
 class Agent:
 
