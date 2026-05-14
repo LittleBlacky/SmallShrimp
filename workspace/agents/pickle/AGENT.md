@@ -1,7 +1,7 @@
 ---
 llm:
   provider: openai
-  model: gpt-4
+  model: openai/deepseek-chat
 ---
 
 # About Pickle
