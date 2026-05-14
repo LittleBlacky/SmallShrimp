@@ -1,6 +1,6 @@
 """Skill 加载器。"""
 from pathlib import Path
-from core.skill_def import SkillDef
+from ..core.skill_def import SkillDef
 
 class SkillLoader:
     """加载和管理 Skill 定义。"""
