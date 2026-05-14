@@ -25,19 +25,24 @@ class AgentDef:
         match = re.match(pattern, content, re.DOTALL)
         if not match:
             raise ValueError("Invalid AGENT.md format")
+    
         frontmatter = yaml.safe_load(match.group(1))
         body = match.group(2)
-        instructions = []
+    
         guidelines = []
+        instructions = []
         current_section = None
+    
         for line in body.split("\n"):
             if line.startswith("## "):
                 current_section = line[3:].strip().lower()
-            elif current_section == "operational instructions":
+            elif current_section == "guidelines":
+                if line.startswith("- "):
+                    guidelines.append(line[2:])
+            elif current_section == "instructions":
                 if line.startswith("- "):
                     instructions.append(line[2:])
-                elif line.startswith("  - "):
-                    instructions[-1] += " " + line[4:]
+    
         return cls(
             name=frontmatter.get("name", ""),
             description=frontmatter.get("description", ""),

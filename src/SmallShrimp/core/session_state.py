@@ -30,5 +30,22 @@ class SessionState:
         return result
 
     def _build_system_prompt(self) -> str:
+        """从 Agent 定义构建完整的系统提示。"""
         agent_def = self.agent.agent_def
-        return f"You are {agent_def.name}. {agent_def.description}"
+
+        parts = [
+            f"You are {agent_def.name}.",
+            agent_def.description,
+        ]
+
+        if agent_def.guidelines:
+            parts.append("\n## Guidelines")
+            for g in agent_def.guidelines:
+                parts.append(f"- {g}")
+
+        if agent_def.instructions:
+            parts.append("\n## Instructions")
+            for i in agent_def.instructions:
+                parts.append(f"- {i}")
+
+        return "\n".join(parts)
