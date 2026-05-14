@@ -1,5 +1,5 @@
 """工具注册表。"""
-from tools.base import Tool
+from .base import Tool
 
 class ToolRegistry:
     """管理所有可用工具。"""
@@ -22,12 +22,12 @@ class ToolRegistry:
         """获取所有工具的 schema（供 LLM 使用）。"""
         return [tool.get_schema() for tool in self._tools.values()]
         
-    def execute_tool(self, name: str, **kwargs) -> str:
+    async def execute_tool(self, name: str, **kwargs) -> str:
         """执行工具并返回结果字符串。"""
         tool = self.get(name)
         if not tool:
             return f"Tool '{name}' not found"
-        result = tool.call(**kwargs)
+        result = await tool.call(**kwargs)
         if result.error:
             return f"Error: {result.error}"
         return result.content

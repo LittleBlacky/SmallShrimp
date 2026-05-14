@@ -2,17 +2,19 @@
 from functools import wraps
 from inspect import signature, Parameter
 from typing import Callable, Any
-from tools.base import Tool, ToolResult
+from ..tools.base import Tool, ToolResult
 
-def tool(name: str, description: str):
+def tool(name: str | None = None, description: str | None = None):
     """
-    装饰器：把一个 async 函数变成 Tool。
-    用法：
-        @tool(name="read", description="读取文件")
-        async def read(path: str) -> str:
-            return Path(path).read_text()
+    装饰器：把 async 函数变成 Tool。
+
+    name: 工具名（默认用函数名）
+    description: 描述（默认用 docstring）
     """
     def decorator(fn: Callable) -> Tool:
+        tool_name = name or fn.__name__
+        tool_desc = description or fn.__doc__ or ""
+
         @wraps(fn)
         async def wrapper(**kwargs: Any) -> ToolResult:
             try:
@@ -24,23 +26,30 @@ def tool(name: str, description: str):
                 return ToolResult(success=False, content="", error=str(e))
 
         class FunctionTool(Tool):
-            _name = name
-            _description = description
-            _fn = fn
-            _params = _extract_params(fn)
+            def __init__(self, tool_name, tool_desc, params, wrapper):
+                self._name = tool_name
+                self._description = tool_desc
+                self._params = params
+                self._wrapper = wrapper
+
             @property
             def name(self) -> str:
                 return self._name
+
             @property
             def description(self) -> str:
                 return self._description
+
             def get_parameters(self) -> dict:
                 return self._params
+
             async def execute(self, **kwargs: Any) -> ToolResult:
                 return await wrapper(**kwargs)
+
             async def call(self, **kwargs: Any) -> ToolResult:
                 return await wrapper(**kwargs)
-        return FunctionTool()
+
+        return FunctionTool(tool_name, tool_desc, _extract_params(fn), wrapper)
     return decorator
 
 def _extract_params(fn: Callable) -> dict:

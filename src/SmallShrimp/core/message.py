@@ -24,8 +24,13 @@ class HumanMessage(Message):
 class AssistantMessage(Message):
     """助手消息。"""
     content: str
+    tool_calls: list | None = None
+
     def to_dict(self) -> dict:
-        return {"role": "assistant", "content": self.content}
+        result = {"role": "assistant", "content": self.content}
+        if self.tool_calls:
+            result["tool_calls"] = self.tool_calls
+        return result
         
 @dataclass
 class ToolMessage(Message):

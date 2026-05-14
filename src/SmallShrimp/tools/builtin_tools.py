@@ -1,6 +1,6 @@
 """内置工具。"""
 from pathlib import Path
-from tools.decorators import tool
+from ..tools.decorators import tool
 
 @tool(name="read", description="Read the contents of a file. Returns the full text content.")
 async def read(path: str) -> str:

@@ -31,31 +31,36 @@ class LLMProvider:
       def from_config(cls, config: LLMConfig) -> "LLMProvider":
           return cls(config)
 
-      async def chat(
-          self,
-          messages: list[Message],
-          **kwargs: Any,
-      ) -> str:
-          request_kwargs: dict[str, Any] = {
-              "model": self.model,
-              "messages": messages,
-          }
-
-          if self.config.provider == "openai":
-              request_kwargs["api_key"] = self.api_key
-              if self.api_base:
-                  request_kwargs["api_base"] = self.api_base
-          elif self.config.provider == "anthropic":
-              request_kwargs["api_key"] = self.api_key
-          elif self.config.provider == "google":
-              request_kwargs["api_key"] = self.api_key
-          else:
-              request_kwargs["api_key"] = self.api_key
-              if self.api_base:
-                  request_kwargs["base_url"] = self.api_base
-
-          request_kwargs.update(kwargs)
-
-          response = await acompletion(**request_kwargs)
-          choice = response.choices[0]
-          return choice.message.content or ""
+      async def chat(self, messages: list[Message], tools: list | None = None, **kwargs) -> dict:
+        """发送聊天请求，返回包含 content 和 tool_calls 的字典。"""
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+        }
+    
+        if self.config.provider == "openai":
+            request_kwargs["api_key"] = self.api_key
+            if self.api_base:
+                request_kwargs["api_base"] = self.api_base
+        elif self.config.provider == "anthropic":
+            request_kwargs["api_key"] = self.api_key
+        elif self.config.provider == "google":
+            request_kwargs["api_key"] = self.api_key
+        else:
+            request_kwargs["api_key"] = self.api_key
+            if self.api_base:
+                request_kwargs["base_url"] = self.api_base
+    
+        if tools:
+            request_kwargs["tools"] = tools
+    
+        request_kwargs.update(kwargs)
+    
+        response = await acompletion(**request_kwargs)
+        choice = response.choices[0]
+        message = choice.message
+    
+        return {
+            "content": message.content or "",
+            "tool_calls": getattr(message, "tool_calls", None),
+        }

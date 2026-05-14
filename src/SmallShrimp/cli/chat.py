@@ -6,6 +6,7 @@ from rich.text import Text
 from ..core.agent import Agent
 from ..core.agent_loader import AgentLoader
 from ..utils.config import Config
+from ..tools.registry import ToolRegistry
 
 console = Console()
 
@@ -33,7 +34,18 @@ async def run_chat_loop() -> None:
     config = Config.from_yaml(Path("workspace/config.user.yaml"))
     loader = AgentLoader(Path("workspace/agents"))
     agent_def = loader.load("pickle")
-    agent = Agent(agent_def, config)
+
+    # 创建工具注册表并注册内置工具
+    from ..tools.registry import ToolRegistry
+    from ..tools.builtin_tools import read, write, glob, grep
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(read)
+    tool_registry.register(write)
+    tool_registry.register(glob)
+    tool_registry.register(grep)
+    
+    agent = Agent(agent_def, config, tool_registry)
     session = agent.new_session()
 
     try:
