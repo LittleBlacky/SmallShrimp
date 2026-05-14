@@ -1,6 +1,6 @@
 [project]
 name = "smallshrimp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Build Your Own AI Agent"
 requires-python = ">=3.11"
 
@@ -18,6 +18,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/SmallShrimp"]
+[tool.hatch.version]
+path = "SmallShrimp/__about__.py"
 
 [project.scripts]
 smallshrimp = "SmallShrimp.cli.main:app"
