@@ -25,14 +25,17 @@ class Agent:
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
 
-        config_llm = self.config.get_llm_config()
+        # 从 agent_def 获取 provider，如果没有就用默认 provider
+        provider_name = self.agent_def.llm.get("provider") or self.config.get_default_provider()
+        provider_config = self.config.get_provider_config(provider_name)
 
         merged = {
-            "provider": self.agent_def.llm.get("provider"),
+            "provider": provider_name,
             "model": self.agent_def.llm.get("model"),
-            "api_key": config_llm.get("api_key"),
-            "api_base": config_llm.get("api_base"),
+            "api_key": provider_config.get("api_key"),
+            "api_base": provider_config.get("api_base"),
             "temperature": self.agent_def.llm.get("temperature", 0.7),
+            "max_tokens": self.agent_def.llm.get("max_tokens", 4096),
         }
 
         return LLMProvider(LLMConfig(**merged))

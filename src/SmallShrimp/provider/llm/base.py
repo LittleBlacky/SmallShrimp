@@ -12,6 +12,7 @@ class LLMConfig:
     api_key: str
     api_base: str | None = None
     temperature: float = 0.7
+    max_tokens: int = 20000
 
     @classmethod
     def from_yaml(cls, path: str) -> "LLMConfig":
@@ -37,7 +38,7 @@ class LLMProvider:
             "model": self.model,
             "messages": messages,
         }
-    
+
         if self.config.provider == "openai":
             request_kwargs["api_key"] = self.api_key
             if self.api_base:
@@ -50,16 +51,20 @@ class LLMProvider:
             request_kwargs["api_key"] = self.api_key
             if self.api_base:
                 request_kwargs["base_url"] = self.api_base
-    
+
         if tools:
             request_kwargs["tools"] = tools
-    
-        request_kwargs.update(kwargs)
-    
+
+        request_kwargs.update({
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            **kwargs
+        })
+
         response = await acompletion(**request_kwargs)
         choice = response.choices[0]
         message = choice.message
-    
+
         return {
             "content": message.content or "",
             "tool_calls": getattr(message, "tool_calls", None),

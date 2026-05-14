@@ -17,8 +17,14 @@ class Config:
             data = yaml.safe_load(f)
         return cls(data)
     
-    def get_llm_config(self) -> dict[str, Any]:
-        return self.data.get("llm", {})
+    def get_provider_config(self, name: str) -> dict[str, Any]:
+        """获取指定 provider 的配置。"""
+        providers = self.data.get("providers", {})
+        return providers.get(name, {})
+
+    def get_default_provider(self) -> str:
+        """获取默认 provider 名称。"""
+        return self.data.get("default_provider", "")
     
     @property
     def workspace(self) -> Path:
