@@ -9,7 +9,6 @@ from ..utils.config import Config
 from ..tools.registry import ToolRegistry
 from ..core.history import HistoryManager
 from ..core.commands.registry import CommandRegistry
-from ..core.commands import handlers
 
 console = Console()
 
