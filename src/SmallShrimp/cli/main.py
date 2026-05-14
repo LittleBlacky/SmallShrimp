@@ -4,7 +4,7 @@ app = typer.Typer(help="SmallShrimp - AI Agent")
 
 @app.command()
 def chat() -> None:
-    from cli.chat import run_chat_loop
+    from .chat import run_chat_loop
     import asyncio
     asyncio.run(run_chat_loop())
 

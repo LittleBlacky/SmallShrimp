@@ -3,9 +3,9 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from core.agent import Agent
-from core.agent_loader import AgentLoader
-from utils.config import Config
+from ..core.agent import Agent
+from ..core.agent_loader import AgentLoader
+from ..utils.config import Config
 
 console = Console()
 

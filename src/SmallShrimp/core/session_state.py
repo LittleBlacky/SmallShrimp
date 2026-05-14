@@ -1,6 +1,11 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
-from core.message import Message, HumanMessage, AssistantMessage
-from core.agent import Agent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..core.agent import Agent
+    
+from ..core.message import Message, HumanMessage, AssistantMessage
 
 @dataclass
 class SessionState:

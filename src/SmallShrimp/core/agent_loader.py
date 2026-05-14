@@ -1,5 +1,5 @@
 from pathlib import Path
-from utils.def_loader import AgentDef
+from ..utils.def_loader import AgentDef
 
 class AgentLoader:
 
