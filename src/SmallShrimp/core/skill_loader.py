@@ -4,7 +4,7 @@ from ..core.skill_def import SkillDef
 
 class SkillLoader:
     """加载和管理 Skill 定义。"""
-    def __init__(self, skills_dir: Path) -> None:
+    def __init__(self, skills_dir: Path = Path("workspace/skills")) -> None:
         self.skills_dir = skills_dir
 
     def discover_skills(self) -> list[SkillDef]:
