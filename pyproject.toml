@@ -19,7 +19,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/SmallShrimp"]
 [tool.hatch.version]
-path = "SmallShrimp/__about__.py"
+path = "src/SmallShrimp/__about__.py"
 
 [project.scripts]
 smallshrimp = "SmallShrimp.cli.main:app"
