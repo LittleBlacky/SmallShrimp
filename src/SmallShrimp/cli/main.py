@@ -6,7 +6,7 @@ app = typer.Typer(help="SmallShrimp - AI Agent")
 def chat() -> None:
     from cli.chat import run_chat_loop
     import asyncio
-    asyncio.run(run_chat_loop)
+    asyncio.run(run_chat_loop())
 
 if __name__ == "__main__":
     app()
