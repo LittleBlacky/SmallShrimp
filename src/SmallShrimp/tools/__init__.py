@@ -22,13 +22,9 @@ def create_tool_registry(config: dict) -> ToolRegistry:
     skill_loader = SkillLoader(Path(skills_dir))
     registry.register(create_skill_tool(skill_loader))
 
-    # Web 工具（有配置才注册）
-    if config.get("websearch"):
-        from .web_tools import create_websearch_tool
-        registry.register(create_websearch_tool(config["websearch"]))
-
-    if config.get("webread"):
-        from .web_tools import create_webread_tool
-        registry.register(create_webread_tool())
+    # Web 工具（无条件注册，Provider 按配置自动降级）
+    from .web_tools import create_websearch_tool, create_webread_tool
+    registry.register(create_websearch_tool(config.get("websearch", {})))
+    registry.register(create_webread_tool())
 
     return registry
