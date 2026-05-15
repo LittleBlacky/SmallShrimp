@@ -39,6 +39,8 @@ smallshrimp chat
 ### 工具系统
 - `ToolRegistry` - 工具注册与执行
 - `@tool` 装饰器 - 将异步函数注册为工具
+- 内置工具：`read`, `write`, `glob`, `grep`（文件操作）
+- Web 工具：`websearch`, `webread`（网页搜索/读取）
 - `SkillLoader` - 从 SKILL.md 加载技能
 
 ### 命令系统
@@ -115,5 +117,31 @@ providers:
   deepseek:
     api_key: xxx
     api_base: https://api.deepseek.com
+```
+
+## Web 搜索配置
+
+支持多 Provider 按优先级自动降级：
+```yaml
+websearch:
+  # Priority 1: 自定义 API（最高优先级）
+  custom:
+    enabled: true
+    api_url: "https://your-search-api.com/search"
+    method: GET
+    params:
+      q: "{query}"
+    field_mapping:
+      title: "title"
+      url: "link"
+      snippet: "description"
+
+  # Priority 2: 预置 Provider
+  provider:
+    name: serpapi  # 或 brave, duckduckgo
+    api_key: your-api-key
+
+  # Priority 3: 默认兜底（duckduckgo 免费）
+  default: duckduckgo
 ```
 

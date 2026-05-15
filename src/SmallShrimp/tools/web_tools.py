@@ -1,28 +1,43 @@
 """Web tools - 搜索和读取网页工具"""
+import logging
 from .decorators import tool
-from ..provider.web_search import create_web_search_provider
+from ..provider.web_search import create_web_search_providers, SearchResult
 from ..provider.web_read import create_web_read_provider
+
+logger = logging.getLogger(__name__)
 
 
 def create_websearch_tool(config: dict):
     """创建网络搜索工具。"""
-    provider = create_web_search_provider(config)
+    # 按优先级获取 Provider 列表
+    providers = create_web_search_providers(config)
 
     @tool(description="Search the web for information. Returns top search results with titles, URLs, and snippets.")
     async def websearch(query: str) -> str:
-        if provider is None:
-            return "Web search is not configured. Please set up websearch in config.user.yaml"
+        # 按优先级尝试各个 Provider
+        for provider in providers:
+            try:
+                results = await provider.search(query)
+                if results:
+                    return _format_results(results)
+            except Exception as e:
+                logger.warning(f"WebSearch provider {provider.__class__.__name__} failed: {e}")
+                continue
 
-        results = await provider.search(query)
-        if not results:
-            return "No results found."
-
-        output = []
-        for i, r in enumerate(results, 1):
-            output.append(f"{i}. **{r['title']}**\n   {r['url']}\n   {r['snippet']}")
-        return "\n\n".join(output)
+        return "Search services are unavailable. Please check your configuration."
 
     return websearch
+
+
+def _format_results(results: list) -> str:
+    """格式化搜索结果。"""
+    output = []
+    for i, r in enumerate(results, 1):
+        title = r.title if isinstance(r, SearchResult) else r.get("title", "")
+        url = r.url if isinstance(r, SearchResult) else r.get("url", "")
+        snippet = r.snippet if isinstance(r, SearchResult) else r.get("snippet", "")
+        output.append(f"{i}. **{title}**\n   {url}\n   {snippet}")
+    return "\n\n".join(output)
 
 
 def create_webread_tool():

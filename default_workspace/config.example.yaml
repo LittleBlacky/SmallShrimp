@@ -9,10 +9,30 @@ llm:
 
 default_agent: pickle
 
-# Get your API key at https://brave.com/search/api/
 # websearch:
-#   provider: brave
-#   api_key: your-brave-search-api-key
+#   # Priority 1: Custom API (highest)
+#   custom:
+#     enabled: true
+#     api_url: "https://your-search-api.com/search"
+#     method: GET  # GET or POST
+#     headers:
+#       Authorization: "Bearer {token}"  # {token} will be replaced
+#     params:
+#       q: "{query}"  # {query} will be replaced
+#       limit: 10
+#     results_path: "results"  # JSON path to results array
+#     field_mapping:
+#       title: "title"
+#       url: "link"
+#       snippet: "description"
+#
+#   # Priority 2: Built-in provider (if no custom)
+#   provider:
+#     name: serpapi  # Options: serpapi, brave, duckduckgo
+#     api_key: your-serpapi-api-key  # Get at https://serpapi.com
+#
+#   # Priority 3: Default fallback (if no provider selected, uses brave with free tier)
+#   default: brave
 
 # webread:
 #   provider: crawl4ai
