@@ -1,5 +1,5 @@
 """Brave Search provider implementation."""
-import aiohttp
+import httpx
 
 
 class BraveSearchProvider:
@@ -8,6 +8,7 @@ class BraveSearchProvider:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.client = httpx.AsyncClient(timeout=30.0)
 
     async def search(self, query: str) -> list:
         """执行 Brave 搜索。"""
@@ -17,22 +18,27 @@ class BraveSearchProvider:
         }
         params = {"q": query, "count": 10}
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
+        try:
+            response = await self.client.get(
                 self.base_url, headers=headers, params=params
-            ) as response:
-                if response.status != 200:
-                    return []
+            )
+            response.raise_for_status()
 
-                data = await response.json()
-                results = []
+            data = response.json()
+            results = []
 
-                web_results = data.get("web", {}).get("results", [])
-                for item in web_results:
-                    results.append({
-                        "title": item.get("title", ""),
-                        "url": item.get("url", ""),
-                        "snippet": item.get("description", ""),
-                    })
+            web_results = data.get("web", {}).get("results", [])
+            for item in web_results:
+                results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "snippet": item.get("description", ""),
+                })
 
-                return results
+            return results
+        except Exception:
+            return []
+
+    async def close(self):
+        """关闭客户端，释放资源。"""
+        await self.client.aclose()
