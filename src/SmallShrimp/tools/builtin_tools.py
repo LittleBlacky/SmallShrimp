@@ -46,7 +46,10 @@ async def grep(pattern: str, path: str = ".") -> str:
 
 from ..core.skill_loader import SkillLoader
 from ..tools.skill_tool import create_skill_tool
+from ..tools.web_tools import create_websearch_tool, create_webread_tool
 from pathlib import Path
 
 _skill_loader = SkillLoader(Path("workspace/skills"))
 skill = create_skill_tool(_skill_loader)
+web_search = create_websearch_tool({})
+webread = create_webread_tool()
