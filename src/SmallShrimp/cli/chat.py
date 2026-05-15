@@ -6,7 +6,7 @@ from rich.text import Text
 from ..core.agent import Agent
 from ..core.agent_loader import AgentLoader
 from ..utils.config import Config
-from ..tools.registry import ToolRegistry
+from ..tools import create_tool_registry
 from ..core.history import HistoryManager
 from ..core.commands.registry import CommandRegistry
 
@@ -34,11 +34,14 @@ async def run_chat_loop() -> None:
 
     # 加载配置和 Agent（注意路径！）
     config = Config.from_yaml(Path("workspace/config.user.yaml"))
+    config.workspace = Path("workspace")
     loader = AgentLoader(Path("workspace/agents"))
     agent_def = loader.load("pickle")
 
-    # 创建工具注册表并注册内置工具    
-    tool_registry = ToolRegistry.from_module("SmallShrimp.tools.builtin_tools")
+    # 创建工具注册表（统一入口）
+    config_dict = config.data.copy()
+    config_dict["skills_dir"] = str(config.workspace / "skills")
+    tool_registry = create_tool_registry(config_dict)
     
     # 历史管理器
     history_manager = HistoryManager(Path("workspace/sessions"))
