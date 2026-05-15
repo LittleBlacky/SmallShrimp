@@ -35,9 +35,12 @@ class HistoryManager:
             elif role == "assistant":
                 content = msg_data.get("content", "")
                 tool_calls = msg_data.get("tool_calls")
+                reasoning_content = msg_data.get("reasoning_content")
                 msg = AssistantMessage(content=content)
                 if tool_calls:
                     msg.tool_calls = tool_calls
+                if reasoning_content:
+                    msg.reasoning_content = reasoning_content
                 messages.append(msg)
             elif role == "tool":
                 messages.append(ToolMessage(

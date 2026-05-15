@@ -1,10 +1,10 @@
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from ..core.session_state import SessionState
 from ..core.message import HumanMessage, AssistantMessage, ToolMessage
-import json
 
 if TYPE_CHECKING:
     from provider.llm.base import LLMProvider
@@ -40,7 +40,7 @@ class Agent:
 
         return LLMProvider(LLMConfig(**merged))
 
-    def new_session(self, session_id: str | None = None) -> "AgentSession":
+    def new_session(self, session_id: Optional[str] = None) -> "AgentSession":
         session_id = session_id or str(uuid.uuid4())
         state = SessionState(
             session_id=session_id,
@@ -73,15 +73,29 @@ class AgentSession:
             # 获取工具 schema
             schemas = self.agent.tool_registry.get_schemas()
 
-            # 调用 LLM（带 tools）
-            response = await self.agent.llm.chat(messages, tools=schemas)
+            # 调用 LLM（带 tools 和 pending_reasoning_content）
+            response = await self.agent.llm.chat(
+                messages,
+                tools=schemas,
+                reasoning_content=self.state.pending_reasoning_content,
+            )
 
             # 解析 LLM 返回
+            reasoning = response.get("reasoning_content")
+            should_store = response.get("should_store_reasoning", False)
+
             if response["tool_calls"]:
 
+                # 保存 assistant 消息
                 assistant_with_tools = AssistantMessage(content="")
                 assistant_with_tools.tool_calls = response["tool_calls"]
+                # 有些 provider 需要把 reasoning_content 嵌入到 assistant 消息中
+                if reasoning:
+                    assistant_with_tools.reasoning_content = reasoning
                 self.state.add_message(assistant_with_tools)
+
+                # 由 thinking_strategy 决定是否保存 reasoning_content 到 pending
+                self.state.pending_reasoning_content = reasoning if should_store else None
 
                 for tool_call in response["tool_calls"]:
                     tool_name = tool_call["function"]["name"]
@@ -107,5 +121,6 @@ class AgentSession:
             # 普通回复，结束循环
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
+
             self.agent.history_manager.save(self.session_id, self.state.messages)
             return response["content"] or ""

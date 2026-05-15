@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Optional, List
 
 class Message(ABC):
     @abstractmethod
@@ -24,12 +25,16 @@ class HumanMessage(Message):
 class AssistantMessage(Message):
     """助手消息。"""
     content: str
-    tool_calls: list | None = None
+    tool_calls: Optional[List] = None
+    reasoning_content: Optional[str] = None  # DeepSeek 思考内容
 
     def to_dict(self) -> dict:
         result = {"role": "assistant", "content": self.content}
         if self.tool_calls:
             result["tool_calls"] = self.tool_calls
+        # DeepSeek 思考模式需要传回 reasoning_content
+        if self.reasoning_content:
+            result["reasoning_content"] = self.reasoning_content
         return result
         
 @dataclass
