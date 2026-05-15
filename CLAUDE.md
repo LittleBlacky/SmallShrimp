@@ -1,0 +1,119 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概述
+
+SmallShrimp 是一个 AI Agent 框架，用于构建智能体应用。支持多 Provider（DeepSeek/Claude/Gemini 等）和思考模式。
+
+## 运行方式
+
+```bash
+# 使用 smallshrimp conda 环境运行
+conda run -n smallshrimp python -m src.SmallShrimp.cli.chat
+
+# 或激活环境后运行
+conda activate smallshrimp
+smallshrimp chat
+```
+
+## 核心架构
+
+### Agent 系统
+- `Agent` - 智能体定义（agent_def + config + llm + tool_registry）
+- `AgentSession` - 会话实例（包含 SessionState）
+- `SessionState` - 会话状态管理（messages + pending_reasoning_content）
+- `AgentLoader` - 从 AGENT.md YAML frontmatter 加载 AgentDef
+
+### 思考模式（Thinking Mode）
+- `ThinkingStrategy` 基类定义了 prepare_request/extract_reasoning_content/should_store_response
+- 支持 DeepSeek、Claude（Anthropic）、Gemini
+- **重要**：DeepSeek 的 reasoning_content 需要在下一轮请求中传回对应 assistant 消息
+  - 存储在 `SessionState.pending_reasoning_content`
+  - `build_messages()` 会自动构建带 reasoning_content 的 assistant 消息
+
+### 消息类型
+- `HumanMessage` / `AssistantMessage` / `ToolMessage` / `SystemMessage`
+- `AssistantMessage` 可包含 `tool_calls` 和 `reasoning_content`（dataclass 字段通过赋值设置）
+
+### 工具系统
+- `ToolRegistry` - 工具注册与执行
+- `@tool` 装饰器 - 将异步函数注册为工具
+- `SkillLoader` - 从 SKILL.md 加载技能
+
+### 命令系统
+- `/skill <name>` - 加载技能内容
+- `/clear` - 清空会话
+- `/help` - 显示帮助
+
+## Workspace 目录结构
+
+```
+workspace/
+├── config.user.yaml      # 用户配置（API keys、模型选择）
+├── agents/               # Agent 定义
+│   └── {name}/
+│       ├── AGENT.md      # Agent 配置（YAML frontmatter + 指令）
+│       └── SOUL.md       # Agent 个性描述
+├── skills/               # 技能定义
+│   └── {name}/
+│       └── SKILL.md
+├── crons/                # 定时任务
+├── sessions/             # 会话历史（JSON）
+└── memories/             # 持久化记忆
+    ├── topics/           # 永久事实
+    ├── projects/         # 项目上下文
+    └── daily-notes/      # 日常记录
+```
+
+## 文件格式
+
+### AGENT.md（YAML frontmatter）
+```markdown
+---
+name: Pickle
+description: A friendly cat assistant
+llm:
+  provider: deepseek
+  model: deepseek/deepseek-v4-flash
+  temperature: 0.7
+  context_window: 1000000
+---
+
+# About Pickle
+You are Pickle, a friendly cat assistant.
+```
+
+### SKILL.md（YAML frontmatter）
+```markdown
+---
+id: skill-creator
+name: skill-creator
+description: Guide for creating effective skills
+---
+
+# Skill Creator Guide
+...
+```
+
+## 多 Agent 调度
+
+使用 `subagent_dispatch` 委托任务给其他 Agent：
+```python
+subagent_dispatch(agent_id="cookie", task="Remember that user prefers Python")
+```
+
+- `cookie` agent - 记忆管理器，用于存储/检索记忆
+- `pickle` agent - 默认助手，处理日常任务
+
+## Provider 配置
+
+`config.user.yaml` 示例：
+```yaml
+default_provider: deepseek
+providers:
+  deepseek:
+    api_key: xxx
+    api_base: https://api.deepseek.com
+```
+

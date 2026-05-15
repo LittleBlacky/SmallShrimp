@@ -21,6 +21,11 @@ class Agent:
         self.llm: "LLMProvider" = self._create_llm()
         self.tool_registry = tool_registry
         self.history_manager = history_manager
+        # 从 agent_def 获取 context_window 的 80% 作为压缩阈值
+        context_window = agent_def.llm.get("context_window", 200000)
+        token_threshold = int(context_window * 0.8)
+        from ..core.context_guard import ContextGuard
+        self.context_guard = ContextGuard(token_threshold=token_threshold)
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -68,7 +73,11 @@ class AgentSession:
 
         # 循环：直到 LLM 返回普通回复
         while True:
-            messages = self.state.build_messages()
+            # 检查并压缩上下文
+            self.state = await self.agent.context_guard.check_and_compact(self.state)
+
+            context_window = self.agent.agent_def.llm.get("context_window")
+            messages = self.state.build_messages(max_context_tokens=context_window)
 
             # 获取工具 schema
             schemas = self.agent.tool_registry.get_schemas()

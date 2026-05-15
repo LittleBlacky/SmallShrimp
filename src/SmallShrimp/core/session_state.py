@@ -32,8 +32,24 @@ class SessionState:
     def build_messages(self, max_context_tokens: int | None = None) -> list[dict]:
         system_prompt = self._build_system_prompt()
         system_msg = SystemMessage(content=system_prompt)
+        system_tokens = self._estimate_tokens(system_msg.content)
+
         # 构建消息列表
         result: list[Message] = [system_msg]
+
+        # 如果有 context_window 限制，截断历史消息
+        if max_context_tokens is not None:
+            available_tokens = max_context_tokens - system_tokens - 100  # 留 100 token 缓冲
+
+            for msg in self.messages:
+                msg_tokens = self._estimate_tokens(msg.content)
+                if available_tokens >= msg_tokens:
+                    result.append(msg)
+                    available_tokens -= msg_tokens
+                else:
+                    break
+        else:
+            result.extend(self.messages)
 
         # 根据 thinking_strategy 决定是否需要注入 reasoning_content 消息
         reasoning_msg = self._build_reasoning_message(
@@ -46,6 +62,15 @@ class SessionState:
 
         # 统一转换为 dict
         return [msg.to_dict() if isinstance(msg, Message) else msg for msg in result]
+
+    def _estimate_tokens(self, text: str) -> int:
+        """估算 token 数量（粗略：英文约 4 字符/token，中文约 2 字符/token）。"""
+        if not text:
+            return 0
+        chinese_chars = sum(1 for c in text if '一' <= c <= '鿿')
+        other_chars = len(text) - chinese_chars
+        return int(chinese_chars / 2 + other_chars / 4)
+
     def _build_system_prompt(self) -> str:
         """从 Agent 定义构建完整的系统提示。"""
         agent_def = self.agent.agent_def
