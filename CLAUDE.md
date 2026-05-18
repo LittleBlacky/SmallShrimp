@@ -119,6 +119,24 @@ providers:
     api_base: https://api.deepseek.com
 ```
 
+## 配置热重载
+
+`Config` 类支持配置文件热重载，监听 `config.user.yaml` 和 `config.runtime.yaml` 变更自动重载：
+
+```python
+from src.SmallShrimp.utils.config import Config
+
+config = Config.from_yaml("workspace/config.user.yaml")
+config.on_change(lambda data: print("配置已更新"))
+config.start_auto_reload()  # 启动文件监听
+config.stop_auto_reload()    # 停止监听
+config.reload()              # 手动重载
+```
+
+多配置文件按优先级深度合并（后面覆盖前面）：
+1. `config.user.yaml` - 用户配置
+2. `config.runtime.yaml` - 运行时配置
+
 ## Web 搜索配置
 
 支持多 Provider 按优先级自动降级：
