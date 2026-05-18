@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ..core.commands.registry import CommandRegistry
     from ..tools.registry import ToolRegistry
     from ..utils.config import Config
+    from ..channels.base import Channel
 
 
 @dataclass
@@ -23,6 +24,7 @@ class Context:
     eventbus: "EventBus"
     command_registry: "CommandRegistry"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
+    channels: list["Channel"] = field(default_factory=list)
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> "Context":
@@ -33,6 +35,7 @@ class Context:
         from ..core.eventbus import EventBus
         from ..core.commands.registry import CommandRegistry
         from ..tools import create_tool_registry
+        from ..channels import create_channels_from_config
 
         config = Config.from_yaml(workspace / "config.user.yaml")
         config.workspace = workspace
@@ -47,6 +50,9 @@ class Context:
         config_dict["skills_dir"] = str(workspace / "skills")
         tool_registry = create_tool_registry(config_dict)
 
+        # 从配置创建 Channel
+        channels = create_channels_from_config(config)
+
         return cls(
             config=config,
             agent_loader=agent_loader,
@@ -55,4 +61,5 @@ class Context:
             eventbus=eventbus,
             command_registry=command_registry,
             workspace=workspace,
+            channels=channels,
         )

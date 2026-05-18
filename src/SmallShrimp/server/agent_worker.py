@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from .worker import SubscriberWorker
 from ..core.agent import Agent
-from ..core.events import InboundEvent, OutboundEvent
+from ..core.events import InboundEvent, OutboundEvent, CliEventSource
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ class AgentWorker(SubscriberWorker):
 
     def __init__(self, context: "Context") -> None:
         super().__init__(context)
-        # 自动订阅事件
         self.context.eventbus.subscribe(InboundEvent, self.dispatch_event)
         self.logger.info("AgentWorker 已订阅 InboundEvent 事件")
 
@@ -86,7 +85,7 @@ class AgentWorker(SubscriberWorker):
             logger.info(f"会话执行完成: {session_id}")
 
             await self.context.eventbus.publish(
-                OutboundEvent(session_id=session_id, content=response)
+                OutboundEvent(session_id=session_id, source=event.source, content=response)
             )
 
         except Exception as e:
@@ -108,9 +107,11 @@ class AgentWorker(SubscriberWorker):
         self, event: InboundEvent, content: str, error: str | None = None
     ) -> None:
         """发送带内容的响应事件。"""
+        source = event.source if hasattr(event, "source") and event.source else CliEventSource()
         await self.context.eventbus.publish(
             OutboundEvent(
                 session_id=event.session_id,
+                source=source,
                 content=content,
                 error=str(error) if error else None,
             )

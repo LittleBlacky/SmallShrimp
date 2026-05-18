@@ -1,97 +1,117 @@
+from __future__ import annotations
+"""Chat CLI - 基于事件驱动架构的交互式会话。"""
 import asyncio
 from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.text import Text
+
 from ..core.agent import Agent
+from ..core.events import OutboundEvent, InboundEvent, CliEventSource
+from ..core.eventbus import EventBus
 from ..core.agent_loader import AgentLoader
 from ..utils.config import Config
-from ..tools import create_tool_registry
-from ..core.history import HistoryManager
-from ..core.commands.registry import CommandRegistry
 
-console = Console()
 
-async def get_user_input() -> str:
-    return await asyncio.to_thread(input, "You: ")
+class ChatLoop:
+    """基于事件驱动的交互式聊天会话。"""
 
-def display_welcome() -> None:
-    console.print(
-        Panel(
-            Text("Welcome to SmallShrimp!", style="bold cyan"),
-            title="Chat",
-            border_style="cyan",
+    def __init__(self, config: Config, agent_id: str | None = None):
+        self.config = config
+        self.console = Console()
+
+        # 创建组件
+        self.eventbus = EventBus()
+        self.agent_loader = AgentLoader(Path("workspace/agents"))
+
+        # 响应队列
+        self.response_queue: asyncio.Queue[OutboundEvent] = asyncio.Queue()
+
+        # 订阅 OutboundEvent
+        self.eventbus.subscribe(OutboundEvent, self.handle_outbound_event)
+
+        # 加载 Agent
+        agent_id = agent_id or config.default_agent
+        self.agent_def = self.agent_loader.load(agent_id)
+
+    async def handle_outbound_event(self, event: OutboundEvent) -> None:
+        """处理出站事件，将响应放入队列。"""
+        await self.response_queue.put(event)
+        self.eventbus.ack(event)
+
+    def get_user_input(self) -> str:
+        """获取用户输入。"""
+        prompt_text = Text("You", style="cyan")
+        user_input = Prompt.ask(prompt_text, console=self.console)
+        return user_input.strip()
+
+    def display_agent_response(self, content: str) -> None:
+        """显示 Agent 响应。"""
+        prefix = Text(f"{self.agent_def.id}: ", style="green")
+        self.console.print(prefix, end="")
+        self.console.print(content)
+
+    async def run(self) -> None:
+        """运行交互式聊天循环。"""
+        self.console.print(
+            Panel(
+                Text("Welcome to SmallShrimp!", style="bold cyan"),
+                title="Chat",
+                border_style="cyan",
+            )
         )
-    )
-    console.print("Type 'quit' or 'exit' to end the session.\n")
+        self.console.print("Type '/help' for commands, 'quit' or 'exit' to end.\n")
 
-def display_response(response: str) -> None:
-    console.print(f"\nAgent: {response}\n")
+        # 启动 EventBus Worker
+        self.eventbus.start()
 
-async def run_chat_loop() -> None:
-    """运行聊天循环。"""
-    display_welcome()
+        # 创建 CLI 会话
+        agent = Agent(
+            self.agent_def,
+            self.config,
+            None,  # CLI 不需要 tool_registry
+            None,  # CLI 不需要 history_manager
+        )
+        session = agent.new_session(CliEventSource())
+        session_id = session.session_id
 
-    # 加载配置和 Agent（注意路径！）
-    config = Config.from_yaml(Path("workspace/config.user.yaml"))
-    config.workspace = Path("workspace")
-    loader = AgentLoader(Path("workspace/agents"))
-    agent_def = loader.load("pickle")
+        try:
+            while True:
+                user_input = await asyncio.to_thread(self.get_user_input)
+                if user_input.lower() in ("quit", "exit", "q"):
+                    self.console.print("\n[bold yellow]Goodbye![/bold yellow]")
+                    break
 
-    # 创建工具注册表（统一入口）
-    config_dict = config.data.copy()
-    config_dict["skills_dir"] = str(config.workspace / "skills")
-    tool_registry = create_tool_registry(config_dict)
-    
-    # 历史管理器
-    history_manager = HistoryManager(Path("workspace/sessions"))
-
-    agent = Agent(agent_def, config, tool_registry, history_manager)
-
-    # 询问是否恢复旧会话
-    sessions = history_manager.list_sessions()
-    if sessions:
-        console.print(f"[dim]找到 {len(sessions)} 个历史会话[/dim]")
-        session_id = sessions[0]["session_id"]  # 默认恢复最新的
-        messages = history_manager.load(session_id)
-        console.print(f"[dim]恢复会话: {session_id[:8]}...[/dim]\n")
-    else:
-        session_id = None
-        messages = []
-
-    session = agent.new_session(session_id)
-    
-    if messages:
-        for msg in messages:
-            session.state.messages.append(msg)
-
-    try:
-        while True:
-            user_input = await get_user_input()
-            if user_input.lower() in ("quit", "exit", "q"):
-                console.print("\n[bold yellow]Goodbye![/bold yellow]")
-                break
-
-            parsed = CommandRegistry.parse(user_input)
-            if parsed:
-                name, args = parsed
-                cmd = CommandRegistry.get(name)
-                if cmd:
-                    from ..core.commands.handlers import CommandContext
-                    context = CommandContext(session)
-                    response = await cmd.handler(context, args)
-                    console.print(f"\n{response}\n")
-                    continue
-                else:
-                    console.print(f"\n[red]未知命令: /{name}[/red]\n")
+                if not user_input:
                     continue
 
-            if not user_input.strip():
-                continue
-            try:
-                response = await session.chat(user_input)
-                display_response(response)
-            except Exception as e:
-                console.print(f"\n[bold red]Error:[/bold red] {e}\n")
-    except (KeyboardInterrupt, EOFError):
-        console.print("\n[bold yellow]Goodbye![/bold yellow]")
+                # 发布 InboundEvent
+                event = InboundEvent(
+                    session_id=session_id,
+                    source=CliEventSource(),
+                    content=user_input,
+                )
+                await self.eventbus.publish(event)
+
+                # 等待响应
+                try:
+                    response = await asyncio.wait_for(
+                        self.response_queue.get(), timeout=60.0
+                    )
+                    self.display_agent_response(response.content)
+                except asyncio.TimeoutError:
+                    self.console.print("[red]Agent response timed out[/red]")
+                    self.console.print()
+
+        except (KeyboardInterrupt, EOFError):
+            self.console.print("\n[bold yellow]Goodbye![/bold yellow]")
+        finally:
+            await self.eventbus.stop()
+
+
+def run_chat(config: Config, agent_id: str | None = None) -> None:
+    """启动聊天会话。"""
+    chat_loop = ChatLoop(config, agent_id=agent_id)
+    asyncio.run(chat_loop.run())
