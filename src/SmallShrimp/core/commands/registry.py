@@ -1,3 +1,4 @@
+from __future__ import annotations
 """命令注册表。"""
 from .base import Command
 

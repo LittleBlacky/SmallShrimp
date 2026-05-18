@@ -1,3 +1,5 @@
+from __future__ import annotations
+"""Agent 定义加载器。"""
 import re
 from dataclasses import dataclass
 from pathlib import Path

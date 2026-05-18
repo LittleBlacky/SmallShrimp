@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Skill 定义。"""
 from dataclasses import dataclass
 from pathlib import Path

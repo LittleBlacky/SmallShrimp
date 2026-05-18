@@ -1,3 +1,4 @@
+from __future__ import annotations
 """工具基类。"""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
