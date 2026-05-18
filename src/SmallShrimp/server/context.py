@@ -25,6 +25,7 @@ class Context:
     command_registry: "CommandRegistry"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
     channels: list["Channel"] = field(default_factory=list)
+    websocket_worker: "WebSocketWorker | None" = field(default=None)
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> "Context":

@@ -67,6 +67,26 @@ class CliEventSource(EventSource):
 
 
 @dataclass
+class WebSocketEventSource(EventSource):
+    """Source for WebSocket-originated events."""
+
+    _namespace = "platform-ws"
+    user_id: str = ""
+
+    def __str__(self) -> str:
+        return f"platform-ws:{self.user_id}"
+
+    @classmethod
+    def from_string(cls, s: str) -> "WebSocketEventSource":
+        _, user_id = s.split(":", 1)
+        return cls(user_id=user_id)
+
+    @property
+    def platform_name(self) -> str:
+        return "websocket"
+
+
+@dataclass
 class Event:
     """Base class for all typed events."""
 

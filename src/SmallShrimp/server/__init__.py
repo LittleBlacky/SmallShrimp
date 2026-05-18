@@ -4,6 +4,7 @@ from .worker import Worker, SubscriberWorker
 from .agent_worker import AgentWorker
 from .channel_worker import ChannelWorker
 from .delivery_worker import DeliveryWorker
+from .websocket_worker import WebSocketWorker
 from .context import Context
 
 __all__ = [
@@ -12,5 +13,6 @@ __all__ = [
     "AgentWorker",
     "ChannelWorker",
     "DeliveryWorker",
+    "WebSocketWorker",
     "Context",
 ]
