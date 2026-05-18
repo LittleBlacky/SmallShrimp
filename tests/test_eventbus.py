@@ -2,12 +2,13 @@ from __future__ import annotations
 """事件总线测试。"""
 import asyncio
 import pytest
-from src.SmallShrimp.core.events import Event, OutboundEvent, InboundEvent
+from src.SmallShrimp.core.events import Event, OutboundEvent, InboundEvent, CliEventSource
 
 
 def test_event_base():
     """测试基础事件类。"""
-    event = Event(session_id="sess-001", content="test")
+    source = CliEventSource()
+    event = Event(session_id="sess-001", source=source, content="test")
     assert event.session_id == "sess-001"
     assert event.content == "test"
     assert event.timestamp > 0
@@ -15,15 +16,18 @@ def test_event_base():
 
 def test_outbound_event():
     """测试出站事件。"""
-    event = OutboundEvent(session_id="sess-001", content="Agent response")
+    source = CliEventSource()
+    event = OutboundEvent(session_id="sess-001", source=source, content="Agent response")
     assert event.content == "Agent response"
     assert event.error is None
 
 
 def test_outbound_event_with_error():
     """测试带错误的出站事件。"""
+    source = CliEventSource()
     event = OutboundEvent(
         session_id="sess-001",
+        source=source,
         content="",
         error="Something went wrong"
     )
@@ -34,7 +38,8 @@ def test_event_serialization_roundtrip():
     """测试事件序列化往返。"""
     from src.SmallShrimp.core.events import serialize_event, deserialize_event
 
-    original = OutboundEvent(session_id="sess-001", content="test content")
+    source = CliEventSource()
+    original = OutboundEvent(session_id="sess-001", source=source, content="test content")
     data = serialize_event(original)
     decoded = deserialize_event(data)
 
@@ -115,7 +120,8 @@ async def test_eventbus_publish_and_dispatch():
     task = bus.start()
 
     # 发布事件
-    event = OutboundEvent(session_id="sess-001", content="test")
+    source = CliEventSource()
+    event = OutboundEvent(session_id="sess-001", source=source, content="test")
     await bus.publish(event)
 
     # 等待处理
@@ -150,9 +156,10 @@ async def test_eventbus_filtered_dispatch():
     # 启动
     task = bus.start()
 
+    source = CliEventSource()
     # 只发布 OutboundEvent
-    await bus.publish(OutboundEvent(session_id="sess-001", content="out"))
-    await bus.publish(OutboundEvent(session_id="sess-002", content="out2"))
+    await bus.publish(OutboundEvent(session_id="sess-001", source=source, content="out"))
+    await bus.publish(OutboundEvent(session_id="sess-002", source=source, content="out2"))
 
     await asyncio.sleep(0.2)
 
@@ -178,9 +185,10 @@ async def test_eventbus_multiple_events():
 
     task = bus.start()
 
+    source = CliEventSource()
     # 发布多个事件
     for i in range(5):
-        await bus.publish(OutboundEvent(session_id=f"sess-{i}", content=f"msg-{i}"))
+        await bus.publish(OutboundEvent(session_id=f"sess-{i}", source=source, content=f"msg-{i}"))
 
     await asyncio.sleep(0.3)
     await bus.stop()
