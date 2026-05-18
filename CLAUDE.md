@@ -48,6 +48,28 @@ smallshrimp chat
 - `/clear` - 清空会话
 - `/help` - 显示帮助
 
+### 事件驱动架构
+- **EventBus** - 事件总线，支持发布/订阅和异步分发
+- **Event** - 事件基类，包含 session_id、source、content
+- **InboundEvent** / **OutboundEvent** - 入站/出站事件
+- **EventSource** - 事件来源抽象基类
+  - `CliEventSource` - CLI 来源（platform-cli:cli-user）
+  - `TelegramEventSource` - Telegram 来源（platform-telegram:user_id:chat_id）
+  - `DiscordEventSource` - Discord 来源（platform-discord:user_id:channel_id）
+- **Event Persistence** - OutboundEvent 持久化和故障恢复（pending 目录）
+
+### Server 模块（Workers）
+- **Worker** - Worker 基类，包含生命周期管理
+- **AgentWorker** - 处理 InboundEvent，执行 Agent
+- **ChannelWorker** - 管理多平台 Channel，发布 InboundEvent
+- **DeliveryWorker** - 订阅 OutboundEvent，通过 Channel 投递
+
+### Channels 模块
+- **Channel** - 消息平台抽象基类（run/reply/stop 接口）
+- **TelegramChannel** - Telegram 平台实现（需要 python-telegram-bot）
+- **DiscordChannel** - Discord 平台实现（需要 discord.py）
+- **CLI** - 直接走 EventBus，不通过 Channel 接口（简化架构）
+
 ## Workspace 目录结构
 
 ```
