@@ -1,9 +1,41 @@
 from __future__ import annotations
 """配置管理模块。"""
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 import yaml
 from .config_reloader import ConfigReloader
+
+
+@dataclass
+class SourceSessionConfig:
+    """来源会话配置 - 关联 EventSource 和会话 ID。"""
+    session_id: str
+
+
+@dataclass
+class TelegramConfig:
+    """Telegram 平台配置。"""
+    enabled: bool = False
+    bot_token: str = ""
+    allowed_user_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DiscordConfig:
+    """Discord 平台配置。"""
+    enabled: bool = False
+    bot_token: str = ""
+    channel_id: str | None = None
+    allowed_user_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ChannelConfig:
+    """频道配置。"""
+    enabled: bool = False
+    telegram: TelegramConfig | None = None
+    discord: DiscordConfig | None = None
 
 
 class Config:
@@ -14,6 +46,8 @@ class Config:
         self._workspace = workspace or Path(".")
         self._reloader: Optional[ConfigReloader] = None
         self._on_change_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self.sources: dict[str, SourceSessionConfig] = {}
+        self._runtime_file = self._workspace / "config.runtime.yaml"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Config":
@@ -114,6 +148,46 @@ class Config:
     def get_default_provider(self) -> str:
         """获取默认 provider 名称。"""
         return self.data.get("default_provider", "")
+
+    @property
+    def default_agent(self) -> str:
+        """获取默认 agent ID。"""
+        return self.data.get("default_agent", "pickle")
+
+    @property
+    def event_path(self) -> Path:
+        """获取事件存储路径。"""
+        return self._workspace / ".event"
+
+    def get_channel_config(self) -> ChannelConfig:
+        """获取频道配置。"""
+        channel_data = self.data.get("channels", {})
+        return ChannelConfig(
+            enabled=channel_data.get("enabled", False),
+            telegram=TelegramConfig(**channel_data.get("telegram", {})) if channel_data.get("telegram") else None,
+            discord=DiscordConfig(**channel_data.get("discord", {})) if channel_data.get("discord") else None,
+        )
+
+    def _set_nested(self, obj: dict, key: str, value: Any) -> None:
+        """使用点号表示法设置嵌套值。"""
+        keys = key.split(".")
+        for k in keys[:-1]:
+            if k not in obj or not isinstance(obj[k], dict):
+                obj[k] = {}
+            obj = obj[k]
+        obj[keys[-1]] = value
+
+    def set_runtime(self, key: str, value: Any) -> None:
+        """在 runtime.yaml 中设置运行时配置（支持嵌套点号）。"""
+        runtime_data: dict[str, Any] = {}
+        if self._runtime_file.exists():
+            with open(self._runtime_file) as f:
+                runtime_data = yaml.safe_load(f) or {}
+
+        self._set_nested(runtime_data, key, value)
+
+        with open(self._runtime_file, "w") as f:
+            yaml.dump(runtime_data, f)
 
     @property
     def workspace(self) -> Path:
