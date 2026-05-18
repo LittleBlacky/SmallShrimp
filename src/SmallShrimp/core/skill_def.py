@@ -11,7 +11,16 @@ class SkillDef:
     id: str
     name: str
     description: str
-    content: str
+    content: str = ""
+
+    def to_dict(self) -> dict:
+        """转换为字典。"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "content": self.content,
+        }
 
     @classmethod
     def from_file(cls, path: str | Path) -> "SkillDef":
@@ -21,14 +30,22 @@ class SkillDef:
 
     @classmethod
     def _parse(cls, content: str) -> "SkillDef":
-        pattern = r"^---\n(.*?)---\n(.*)$"
-        match = re.match(pattern, content, re.DOTALL)
-        if not match:
-            raise ValueError("Invalid SKILL.md format")
-        frontmatter = yaml.safe_load(match.group(1))
+        if content.startswith("---"):
+            parts = content.split("\n---", 1)
+            if len(parts) >= 2:
+                frontmatter_text = parts[0].replace("---", "").strip()
+                frontmatter = yaml.safe_load(frontmatter_text) if frontmatter_text else {}
+                body = parts[1].strip()
+                return cls(
+                    id=frontmatter.get("id", "") if frontmatter else "",
+                    name=frontmatter.get("name", "") if frontmatter else "",
+                    description=frontmatter.get("description", "") if frontmatter else "",
+                    content=body,
+                )
+        # 无 frontmatter，使用纯内容
         return cls(
-            id=frontmatter.get("id", ""),
-            name=frontmatter.get("name", ""),
-            description=frontmatter.get("description", ""),
-            content=match.group(2).strip(),
+            id="",
+            name="",
+            description="",
+            content=content.strip(),
         )
