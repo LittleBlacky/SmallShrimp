@@ -7,16 +7,11 @@ from __future__ import annotations
   Tier 1 (Snip):       Replace stale/duplicate reads with placeholders
   Tier 2 (Microcompact): Drop old tool results after inactivity
   Tier 3 (Autocompact): LLM summary (API call)
-
-+ Progressive read: large tool results are persisted and shown as
-  initial chunk + offset hints, LLM calls read(offset=N) to continue.
 """
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-import os
 import time
-import uuid
 
 from litellm import token_counter
 
@@ -25,8 +20,6 @@ if TYPE_CHECKING:
 
 from .message import Message, ToolMessage, HumanMessage
 
-OFFLOAD_SIZE_THRESHOLD = 8000   # chars: results larger than this get persisted
-OFFLOAD_INLINE_CHARS = 5000     # chars to show inline in ToolMessage before hint
 MICROCOMPACT_IDLE_SECONDS = 60
 
 COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
@@ -51,11 +44,9 @@ class ContextGuard:
         self,
         token_threshold: int = 160000,
         context_window: int = 200000,
-        offload_dir: str | None = None,
     ):
         self.token_threshold = token_threshold
         self.context_window = context_window
-        self.offload_dir = offload_dir or os.path.join(os.getcwd(), "workspace", ".cache", "tool_results")
         self._last_activity: float = time.time()
         self._seen_files: dict[str, int] = {}  # file → last_seen_msg_index
 
@@ -72,65 +63,6 @@ class ContextGuard:
             return state._estimate_tokens(
                 "".join(m.get("content", "") or "" for m in messages)
             )
-
-    # ── Offload (progressive read) ──────────────────────────
-    def _offload_large_results(self, messages: list["Message"]) -> list["Message"]:
-        """大结果落盘 + 展示首段，LLM 用 read(offset=N) 渐进读取。"""
-        tokens = self.estimate_tokens_raw(messages)
-        ratio = self._fill_ratio(tokens)
-        if ratio < 0.5:
-            threshold = OFFLOAD_SIZE_THRESHOLD * 3
-        elif ratio < 0.7:
-            threshold = OFFLOAD_SIZE_THRESHOLD
-        else:
-            threshold = OFFLOAD_SIZE_THRESHOLD // 2
-
-        result: list[Message] = []
-        for msg in messages:
-            if isinstance(msg, ToolMessage) and msg.content and len(msg.content) > threshold:
-                result.append(self._offload_one(msg))
-            else:
-                result.append(msg)
-        return result
-
-    def _offload_one(self, msg: ToolMessage) -> ToolMessage:
-        """落盘完整结果，返回：内联首段 + offset 提示。"""
-        content = msg.content or ""
-        tool_name = msg.name or "unknown"
-        tool_id = msg.tool_call_id or uuid.uuid4().hex[:8]
-
-        os.makedirs(self.offload_dir, exist_ok=True)
-        filename = f"{tool_name}_{tool_id}.txt"
-        filepath = os.path.join(self.offload_dir, filename)
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        inline = content[:OFFLOAD_INLINE_CHARS]
-        shown_lines = inline.count("\n") + 1
-        total_lines = content.count("\n") + 1
-        total_chars = len(content)
-
-        # 计算建议 limit：确保下次 read 结果不超过 OFFLOAD_SIZE_THRESHOLD
-        avg_line_len = max(1, len(inline) // shown_lines)
-        suggested_limit = max(10, OFFLOAD_SIZE_THRESHOLD // max(1, avg_line_len))
-
-        hint = (
-            f"{inline}\n"
-            f"\n[Lines 0-{shown_lines - 1} of {total_lines}, {total_chars} chars total]\n"
-            f"Full result persisted to {filepath}.\n"
-            f"To continue: read(path=\"{filepath}\", offset={shown_lines}, limit={suggested_limit})"
-        )
-        return ToolMessage(content=hint, tool_call_id=msg.tool_call_id, name=msg.name)
-
-    def estimate_tokens_raw(self, messages: list["Message"]) -> int:
-        """估算原始消息列表的 token（不通过 state）。"""
-        model = "gpt-4"
-        try:
-            dict_msgs = [msg.to_dict() if hasattr(msg, 'to_dict') else msg for msg in messages]
-            return token_counter(model=model, messages=dict_msgs)
-        except Exception:
-            return sum(len(getattr(m, 'content', '') or '') // 4 for m in messages)
 
     # ── Snip ────────────────────────────────────────────────
     def _snip_duplicates(self, messages: list["Message"]) -> list["Message"]:
@@ -228,19 +160,13 @@ class ContextGuard:
 
     # ── Main check ────────────────────────────────────────────
     async def check_and_compact(self, state: "SessionState") -> "SessionState":
-        """4 阶段压缩：Offload 落盘 → Snip 去重 → Microcompact 清旧 → Autocompact 总结。"""
+        """3 阶段压缩：Snip 去重 → Microcompact 清旧 → Autocompact 总结。"""
         tokens = self.estimate_tokens(state)
 
-        # 未超限
         if tokens < self.token_threshold:
             return state
 
-        # Offload — 大结果落盘（无损：read 可恢复）
-        state.messages = self._offload_large_results(state.messages)
-        if self.estimate_tokens(state) < self.token_threshold:
-            return state
-
-        # Snip — 替换重复读取（无损：保留最后一次完整内容）
+        # Snip — 替换重复读取
         state.messages = self._snip_duplicates(state.messages)
         if self.estimate_tokens(state) < self.token_threshold:
             return state
