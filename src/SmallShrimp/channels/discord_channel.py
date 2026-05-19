@@ -36,6 +36,7 @@ class DiscordChannel(Channel[DiscordEventSource]):
     """Discord 平台实现。"""
 
     platform_name = "discord"
+    max_message_length = 2000
 
     def __init__(self, config: DiscordConfig):
         self.config = config

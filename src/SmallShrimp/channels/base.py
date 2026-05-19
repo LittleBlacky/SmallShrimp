@@ -9,7 +9,11 @@ T = TypeVar("T", bound=EventSource)
 
 
 class Channel(ABC, Generic[T]):
-    """消息平台抽象基类。"""
+    """消息平台抽象基类。
+
+    子类必须实现：platform_name, reply, is_allowed
+    子类可选实现：run, stop（默认 no-op，纯输出 Channel 不需要）
+    """
 
     @property
     @abstractmethod
@@ -17,10 +21,9 @@ class Channel(ABC, Generic[T]):
         """平台标识符。"""
         ...
 
-    @abstractmethod
     async def run(self, on_message: Callable[[str, T], Awaitable[None]]) -> None:
-        """启动频道，阻塞直到 stop() 被调用。"""
-        ...
+        """启动频道（默认 no-op，纯输出 Channel 不 override）。"""
+        pass
 
     @abstractmethod
     def is_allowed(self, source: T) -> bool:
@@ -32,7 +35,11 @@ class Channel(ABC, Generic[T]):
         """回复消息。"""
         ...
 
-    @abstractmethod
     async def stop(self) -> None:
-        """停止监听并清理资源。"""
-        ...
+        """停止监听（默认 no-op）。"""
+        pass
+
+    @property
+    def max_message_length(self) -> int:
+        """单条消息最大长度，默认无限制。"""
+        return 2**31  # 近似无限

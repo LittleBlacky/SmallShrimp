@@ -5,7 +5,6 @@ from src.SmallShrimp.server.delivery_worker import (
     DeliveryWorker,
     chunk_message,
     compute_backoff_ms,
-    PLATFORM_LIMITS,
 )
 
 
@@ -40,10 +39,11 @@ def test_compute_backoff_ms():
 
 
 def test_platform_limits():
-    """测试平台消息限制。"""
-    assert PLATFORM_LIMITS["telegram"] == 4096
-    assert PLATFORM_LIMITS["discord"] == 2000
-    assert PLATFORM_LIMITS["cli"] == float("inf")
+    """Channel 自带 max_message_length。"""
+    from src.SmallShrimp.channels.telegram_channel import TelegramChannel
+    from src.SmallShrimp.utils.config import TelegramConfig
+    ch = TelegramChannel(TelegramConfig(bot_token="test"))
+    assert ch.max_message_length == 4096
 
 
 def test_delivery_worker_init():

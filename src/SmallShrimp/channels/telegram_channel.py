@@ -33,6 +33,7 @@ class TelegramChannel(Channel[TelegramEventSource]):
     """Telegram 平台实现。"""
 
     platform_name = "telegram"
+    max_message_length = 4096
 
     def __init__(self, config: TelegramConfig):
         self.config = config

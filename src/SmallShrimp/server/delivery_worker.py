@@ -19,13 +19,6 @@ logger = logging.getLogger(__name__)
 BACKOFF_MS = [5000, 25000, 120000, 600000]  # 5s, 25s, 2min, 10min
 MAX_RETRIES = 5
 
-# 平台消息大小限制
-PLATFORM_LIMITS: dict[str, float] = {
-    "telegram": 4096,
-    "discord": 2000,
-    "cli": float("inf"),  # 无限制
-}
-
 
 def compute_backoff_ms(retry_count: int) -> int:
     """计算带 jitter 的退避时间。"""
@@ -132,10 +125,9 @@ class DeliveryWorker(SubscriberWorker):
                 self.context.eventbus.ack(event)
                 return
 
-            # 分割消息
-            limit = PLATFORM_LIMITS.get(source.platform_name, float("inf"))
-            limit_int = int(limit) if limit != float("inf") else len(event.content)
-            chunks = chunk_message(event.content, limit_int)
+            # 分割消息（按平台限制）
+            limit = getattr(channel, "max_message_length", 2**31)
+            chunks = chunk_message(event.content, limit)
 
             # 投递
             success = await self._deliver_with_retry(chunks, source, channel)
