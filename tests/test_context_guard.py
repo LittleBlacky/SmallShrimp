@@ -40,8 +40,8 @@ def test_budget_truncate():
     assert len(truncated) == 2
     assert truncated[0].content == "Hello"
     # 简单头部截断应包含 truncated 标记
-    # name="test" 走非 read 路径 → "first and last"
-    assert "first and last" in truncated[1].content.lower()
+    # name="test" 非 read → "showing first and last"
+    assert "showing first and last" in truncated[1].content.lower()
 
 
 def test_truncate_preserves_small_results():

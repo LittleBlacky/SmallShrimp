@@ -83,14 +83,35 @@ class ContextGuard:
                 half = limit // 2
                 head = msg.content[:half]
                 tail = msg.content[-half:]
+                line_info = self._read_line_range(msg.content, head, tail)
                 truncated.append(ToolMessage(
-                    content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
+                    content=f"{head}\n\n...[{len(msg.content)} chars]{line_info}\n\n{tail}",
                     tool_call_id=msg.tool_call_id,
                     name=msg.name,
                 ))
             else:
                 truncated.append(msg)
         return truncated
+
+    @staticmethod
+    def _read_line_range(content: str, head: str, tail: str) -> str:
+        """从 read 结果头部解析行范围，返回缺失区间提示。"""
+        if not content.startswith("[Lines "):
+            return f", showing first and last {len(head)}"
+        try:
+            end = content.index("]")
+            parts = content[7:end].split()
+            total_lines = int(parts[0].split(" of ")[1]) if " of " in parts[0] else int(parts[0].split("-")[-1])
+            head_lines = head.count("\n") + 1
+            tail_lines = tail.count("\n") + 1
+            # 尾部最后一行号约等于 total - 1
+            tail_start = total_lines - tail_lines
+            return (
+                f", missing lines {head_lines}-{tail_start - 1} of {total_lines}. "
+                f"Use read(path, offset={head_lines}, limit=N)"
+            )
+        except Exception:
+            return f", showing first and last {len(head)}"
 
     def estimate_tokens_raw(self, messages: list["Message"]) -> int:
         """估算原始消息列表的 token（不通过 state）。"""
