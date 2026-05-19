@@ -15,12 +15,13 @@ if TYPE_CHECKING:
     
 class Agent:
 
-    def __init__(self, agent_def: "AgentDef", config: "Config", tool_registry: "ToolRegistry", history_manager: "HistoryManager") -> None:
+    def __init__(self, agent_def: "AgentDef", config: "Config", tool_registry: "ToolRegistry", history_manager: "HistoryManager", shared_context: "SharedContext | None" = None) -> None:
         self.agent_def = agent_def
         self.config = config
         self.llm: "LLMProvider" = self._create_llm()
         self.tool_registry = tool_registry
         self.history_manager = history_manager
+        self.shared_context = shared_context
         # 从 agent_def 获取 context_window 的 80% 作为压缩阈值
         context_window = agent_def.llm.get("context_window", 200000)
         token_threshold = int(context_window * 0.8)
@@ -45,12 +46,14 @@ class Agent:
 
         return LLMProvider(LLMConfig(**merged))
 
-    def new_session(self, session_id: Optional[str] = None) -> "AgentSession":
+    def new_session(self, session_id: Optional[str] = None, source: str | None = None) -> "AgentSession":
         session_id = session_id or str(uuid.uuid4())
         state = SessionState(
             session_id=session_id,
             agent=self,
             messages=[],
+            shared_context=getattr(self, 'shared_context', None),
+            source=source,
         )
         return AgentSession(agent=self, state=state)
 
@@ -131,5 +134,6 @@ class AgentSession:
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
 
-            self.agent.history_manager.save(self.session_id, self.state.messages)
+            if self.agent.history_manager:
+                self.agent.history_manager.save(self.session_id, self.state.messages)
             return response["content"] or ""

@@ -7,6 +7,7 @@ from dataclasses import replace
 from .worker import SubscriberWorker
 from ..core.agent import Agent
 from ..core.events import InboundEvent, OutboundEvent, CliEventSource
+from ..core.commands.registry import CommandRegistry
 
 logger = logging.getLogger(__name__)
 
