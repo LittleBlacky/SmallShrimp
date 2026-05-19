@@ -80,8 +80,11 @@ class ContextGuard:
         truncated = []
         for msg in messages:
             if isinstance(msg, ToolMessage) and len(msg.content) > limit:
+                half = limit // 2
+                head = msg.content[:half]
+                tail = msg.content[-half:]
                 truncated.append(ToolMessage(
-                    content=msg.content[:limit] + f"\n...[truncated, {len(msg.content)} chars total]",
+                    content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
                     tool_call_id=msg.tool_call_id,
                     name=msg.name,
                 ))

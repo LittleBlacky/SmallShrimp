@@ -41,11 +41,16 @@ def test_fill_ratio():
     assert guard._fill_ratio(100000) == 0.5
 
 
-def test_budget_truncate_simple():
+def test_budget_truncate_head_tail():
     guard = ContextGuard(context_window=100000)
-    huge = ToolMessage(content="x" * 12000, tool_call_id="c1", name="test")
-    result = guard._budget_truncate([huge])
-    assert "truncated" in result[0].content.lower()
+    head = "HEAD_" + "A" * 4995
+    tail = "TAIL_" + "Z" * 4995
+    content = head + "M" * 2000 + tail
+    msg = ToolMessage(content=content, tool_call_id="c1", name="grep")
+    result = guard._budget_truncate([msg])
+    assert "HEAD_" in result[0].content
+    assert "TAIL_" in result[0].content
+    assert "first and last" in result[0].content
 
 
 if __name__ == "__main__":
@@ -53,5 +58,5 @@ if __name__ == "__main__":
     test_snip_duplicates_preserves_unique_reads()
     test_microcompact_keeps_recent()
     test_fill_ratio()
-    test_budget_truncate_simple()
+    test_budget_truncate_head_tail()
     print("All multi-stage compaction tests passed!")
