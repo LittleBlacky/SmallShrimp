@@ -2,21 +2,34 @@ from __future__ import annotations
 """命令注册表。"""
 from .base import Command
 
+_commands: dict[str, Command] = {}
+
+def _get_commands() -> dict[str, Command]:
+    return _commands
+
 class CommandRegistry:
     """管理命令的注册和查找。"""
-    _commands: dict[str, Command] = {}
+
+    @property
+    def _commands(self) -> dict[str, Command]:
+        return _commands
+
+    @classmethod
+    def clear(cls) -> None:
+        """清空所有注册的命令。"""
+        _commands.clear()
 
     @classmethod
     def register(cls, command: Command) -> None:
-        cls._commands[command.name] = command
+        _commands[command.name] = command
 
     @classmethod
     def get(cls, name: str) -> Command | None:
-        return cls._commands.get(name)
+        return _commands.get(name)
 
     @classmethod
     def list_all(cls) -> list[Command]:
-        return list(cls._commands.values())
+        return list(_commands.values())
 
     @classmethod
     def parse(cls, user_input: str) -> tuple[str, list[str]] | None:
@@ -40,7 +53,8 @@ class CommandRegistry:
             return None
         return await cmd.handler(context, args)
 
-    def from_modules(cls, *modules):
+    @classmethod
+    def from_modules(cls, *modules) -> None:
         """从模块自动注册命令。"""
         for module in modules:
             for name, obj in vars(module).items():
@@ -52,6 +66,14 @@ class CommandRegistry:
                         usage=meta['usage'],
                         handler=obj,
                     ))
+
+    @classmethod
+    def with_builtins(cls) -> "CommandRegistry":
+        """创建注册表并注册所有内置命令。"""
+        from ..commands import handlers
+        cls.from_modules(handlers)
+        return cls
+
 
 def register_command(name: str, description: str, usage: str):
       def decorator(func):

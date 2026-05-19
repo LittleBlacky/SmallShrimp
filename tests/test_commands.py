@@ -6,12 +6,12 @@ from src.SmallShrimp.core.commands.base import Command
 
 def setup_module():
     """每个测试前清空命令注册表。"""
-    CommandRegistry._commands.clear()
+    CommandRegistry.clear()
 
 
 def teardown_module():
     """每个测试后清空命令注册表。"""
-    CommandRegistry._commands.clear()
+    CommandRegistry.clear()
 
 
 def test_command_registry_register():
