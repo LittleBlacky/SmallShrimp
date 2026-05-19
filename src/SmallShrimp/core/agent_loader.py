@@ -18,6 +18,16 @@ class AgentLoader:
             return []
         return [d.name for d in self.agents_dir.iterdir() if d.is_dir()]
 
+    def discover_agents(self) -> list["AgentDef"]:
+        """发现并加载所有 Agent 定义。"""
+        result = []
+        for name in self.list_agents():
+            try:
+                result.append(self.load(name))
+            except Exception:
+                pass
+        return result
+
     def _load_soul_md(self, agent_id: str) -> str:
         """Load SOUL.md file for an agent if it exists."""
         soul_path = self.agents_dir / agent_id / "SOUL.md"

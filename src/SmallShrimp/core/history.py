@@ -89,7 +89,7 @@ class HistoryManager:
             data["updated_at"] = datetime.now().isoformat()
             file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
-    def create_session(self, session_id: str, source: str) -> None:
+    def create_session(self, session_id: str, source: str, agent_id: str = "") -> None:
         """创建新会话（如果不存在）。"""
         file_path = self.sessions_dir / f"{session_id}.json"
         if not file_path.exists():
@@ -97,6 +97,7 @@ class HistoryManager:
                 "session_id": session_id,
                 "messages": [],
                 "source": source,
+                "agent_id": agent_id,
                 "updated_at": datetime.now().isoformat(),
             }
             file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))

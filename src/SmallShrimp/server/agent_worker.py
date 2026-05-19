@@ -37,7 +37,7 @@ class AgentWorker(SubscriberWorker):
             logger.error(f"会话不存在: {session_id}")
             return
 
-        agent_id = session_info.get("agent_id", "pickle")  # 默认为 pickle
+        agent_id = session_info.get("agent_id") or self.context.config.default_agent
 
         try:
             agent_def = self.context.agent_loader.load(agent_id)

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.routing import RoutingTable
+
 if TYPE_CHECKING:
     from ..core.agent_loader import AgentLoader
     from ..core.history import HistoryManager
@@ -32,6 +34,7 @@ class Context:
     memory_manager: "MemoryManager"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
     channels: list["Channel"] = field(default_factory=list)
+    routing_table: "RoutingTable | None" = field(default=None)
     websocket_worker: "WebSocketWorker | None" = field(default=None)
 
     @classmethod
@@ -70,7 +73,8 @@ class Context:
         # 从配置创建 Channel
         channels = create_channels_from_config(config)
 
-        return cls(
+        # 先创建 Context 以支持 RoutingTable 的反向引用
+        context = cls(
             config=config,
             agent_loader=agent_loader,
             skill_loader=skill_loader,
@@ -83,3 +87,7 @@ class Context:
             workspace=workspace,
             channels=channels,
         )
+
+        # RoutingTable 需要 Context 引用
+        context.routing_table = RoutingTable(context)
+        return context
