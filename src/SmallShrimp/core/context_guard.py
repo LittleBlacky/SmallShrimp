@@ -111,11 +111,15 @@ class ContextGuard:
         total_lines = content.count("\n") + 1
         total_chars = len(content)
 
+        # 计算建议 limit：确保下次 read 结果不超过 OFFLOAD_SIZE_THRESHOLD
+        avg_line_len = max(1, len(inline) // shown_lines)
+        suggested_limit = max(10, OFFLOAD_SIZE_THRESHOLD // max(1, avg_line_len))
+
         hint = (
             f"{inline}\n"
             f"\n[Lines 0-{shown_lines - 1} of {total_lines}, {total_chars} chars total]\n"
             f"Full result persisted to {filepath}.\n"
-            f"To continue: read(path=\"{filepath}\", offset={shown_lines})"
+            f"To continue: read(path=\"{filepath}\", offset={shown_lines}, limit={suggested_limit})"
         )
         return ToolMessage(content=hint, tool_call_id=msg.tool_call_id, name=msg.name)
 

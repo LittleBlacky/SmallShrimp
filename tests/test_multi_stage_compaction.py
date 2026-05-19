@@ -53,6 +53,7 @@ def test_offload_glob_writes_file():
         result = guard._offload_large_results([msg])
         content = result[0].content
         assert "To continue: read(path=" in content
+        assert "limit=" in content
         assert "[Lines 0-" in content
         assert "Full result persisted to" in content
         # 内联首段是原内容的前缀
@@ -75,6 +76,7 @@ def test_offload_grep_writes_file():
         result = guard._offload_large_results([msg])
         content = result[0].content
         assert "To continue: read(path=" in content
+        assert "limit=" in content
         assert "[Lines 0-" in content
         assert content.startswith(matches[:5000])
         offloaded_files = os.listdir(tmpdir)
@@ -91,6 +93,7 @@ def test_offload_websearch_writes_file():
         msg = ToolMessage(content=content, tool_call_id="c1", name="websearch")
         result = guard._offload_large_results([msg])
         assert "To continue: read(path=" in result[0].content
+        assert "limit=" in result[0].content
         assert result[0].content.startswith(content[:5000])
 
 
@@ -106,6 +109,7 @@ def test_offload_read_writes_file():
         result = guard._offload_large_results([msg])
         assert "To continue: read(path=" in result[0].content
         assert "offset=" in result[0].content
+        assert "limit=" in result[0].content
         assert result[0].content.startswith(content[:5000])
 
 

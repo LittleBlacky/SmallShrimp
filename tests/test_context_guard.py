@@ -42,6 +42,7 @@ def test_offload_large_results():
         assert len(offloaded) == 2
         assert offloaded[0].content == "Hello"
         assert "To continue: read(path=" in offloaded[1].content
+        assert "limit=" in offloaded[1].content
         assert "offset=" in offloaded[1].content
         assert offloaded[1].content.startswith(large_content[:5000])
 
