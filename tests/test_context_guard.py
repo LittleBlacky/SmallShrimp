@@ -21,63 +21,71 @@ def test_context_guard_default_threshold():
     assert guard.token_threshold == 160000  # 80% of 200k
 
 
-def test_budget_truncate():
-    """测试工具结果截断（Tier 1 Budget）。"""
-    from src.SmallShrimp.core.context_guard import ContextGuard, MAX_TOOL_RESULT_CHARS
+def test_offload_large_results():
+    """测试大工具结果落盘（Tier 1 Offload）。"""
+    import tempfile, os
+    from src.SmallShrimp.core.context_guard import ContextGuard
     from src.SmallShrimp.core.message import HumanMessage, ToolMessage
 
-    guard = ContextGuard(context_window=100000)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        guard = ContextGuard(context_window=500, offload_dir=tmpdir)
 
-    large_content = "x" * (MAX_TOOL_RESULT_CHARS + 1000)
+        large_content = "x" * 12000
 
-    messages = [
-        HumanMessage(content="Hello"),
-        ToolMessage(content=large_content, tool_call_id="call1", name="test"),
-    ]
+        messages = [
+            HumanMessage(content="Hello"),
+            ToolMessage(content=large_content, tool_call_id="call1", name="test"),
+        ]
 
-    truncated = guard._budget_truncate(messages)
+        offloaded = guard._offload_large_results(messages)
 
-    assert len(truncated) == 2
-    assert truncated[0].content == "Hello"
-    # 简单头部截断应包含 truncated 标记
-    # name="test" 非 read → "showing first and last"
-    assert "showing first and last" in truncated[1].content.lower()
+        assert len(offloaded) == 2
+        assert offloaded[0].content == "Hello"
+        assert "[Offloaded:" in offloaded[1].content
+        assert "Use read(path=" in offloaded[1].content
+        # 确认文件落盘
+        assert len(os.listdir(tmpdir)) == 1
 
 
-def test_truncate_preserves_small_results():
-    """测试小结果不会被截断。"""
+def test_offload_preserves_small_results():
+    """测试小结果不会落盘。"""
+    import tempfile, os
     from src.SmallShrimp.core.context_guard import ContextGuard
     from src.SmallShrimp.core.message import ToolMessage
 
-    guard = ContextGuard(context_window=100000)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        guard = ContextGuard(context_window=500, offload_dir=tmpdir)
 
-    messages = [
-        ToolMessage(content="Small result", tool_call_id="call1", name="test"),
-    ]
+        messages = [
+            ToolMessage(content="Small result", tool_call_id="call1", name="test"),
+        ]
 
-    truncated = guard._budget_truncate(messages)
+        offloaded = guard._offload_large_results(messages)
 
-    assert len(truncated) == 1
-    assert truncated[0].content == "Small result"
+        assert len(offloaded) == 1
+        assert offloaded[0].content == "Small result"
+        assert os.listdir(tmpdir) == []
 
 
-def test_truncate_non_tool_messages():
-    """测试非工具消息不被截断。"""
+def test_offload_non_tool_messages():
+    """测试非工具消息不落盘。"""
+    import tempfile
     from src.SmallShrimp.core.context_guard import ContextGuard
     from src.SmallShrimp.core.message import HumanMessage, AssistantMessage
 
-    guard = ContextGuard(context_window=100000)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        guard = ContextGuard(context_window=500, offload_dir=tmpdir)
 
-    messages = [
-        HumanMessage(content="User message"),
-        AssistantMessage(content="Assistant response"),
-    ]
+        messages = [
+            HumanMessage(content="User message"),
+            AssistantMessage(content="Assistant response"),
+        ]
 
-    truncated = guard._budget_truncate(messages)
+        offloaded = guard._offload_large_results(messages)
 
-    assert len(truncated) == 2
-    assert truncated[0].content == "User message"
-    assert truncated[1].content == "Assistant response"
+        assert len(offloaded) == 2
+        assert offloaded[0].content == "User message"
+        assert offloaded[1].content == "Assistant response"
 
 
 @pytest.mark.asyncio
@@ -109,7 +117,7 @@ async def test_check_and_compact_under_threshold():
 if __name__ == "__main__":
     test_context_guard_init()
     test_context_guard_default_threshold()
-    test_budget_truncate()
-    test_truncate_preserves_small_results()
-    test_truncate_non_tool_messages()
+    test_offload_large_results()
+    test_offload_preserves_small_results()
+    test_offload_non_tool_messages()
     print("\nAll test_context_guard tests passed!")

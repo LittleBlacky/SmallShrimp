@@ -4,7 +4,7 @@ from __future__ import annotations
 """Context guard for proactive context window management.
 
 4-tier compaction (zero-cost first):
-  Tier 1 (Budget):     Progressive tool result truncation
+  Tier 1 (Offload):    Persist large tool results to disk, keep summary+path in message
   Tier 2 (Snip):       Replace stale/duplicate reads with placeholders
   Tier 3 (Microcompact): Drop old tool results after inactivity
   Tier 4 (Autocompact): LLM summary (API call)
@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+import os
 import time
+import uuid
 
 from litellm import token_counter
 
@@ -21,10 +23,9 @@ if TYPE_CHECKING:
 
 from .message import Message, ToolMessage, HumanMessage
 
-MAX_TOOL_RESULT_CHARS = 10000
-BUDGET_TIER1_CHARS = 30000   # 50-70% context full
-BUDGET_TIER2_CHARS = 15000   # >70% full
-MICROCOMPACT_IDLE_SECONDS = 60  # inactivity before microcompact
+OFFLOAD_SIZE_THRESHOLD = 10000  # chars: results larger than this get offloaded to disk
+OFFLOAD_HEAD_CHARS = 3000       # chars to keep as inline summary
+MICROCOMPACT_IDLE_SECONDS = 60
 
 COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
 
@@ -44,9 +45,15 @@ Please provide your summary following this structure."""
 
 class ContextGuard:
 
-    def __init__(self, token_threshold: int = 160000, context_window: int = 200000):
+    def __init__(
+        self,
+        token_threshold: int = 160000,
+        context_window: int = 200000,
+        offload_dir: str | None = None,
+    ):
         self.token_threshold = token_threshold
         self.context_window = context_window
+        self.offload_dir = offload_dir or os.path.join(os.getcwd(), "workspace", ".cache", "tool_results")
         self._last_activity: float = time.time()
         self._seen_files: dict[str, int] = {}  # file → last_seen_msg_index
 
@@ -64,132 +71,125 @@ class ContextGuard:
                 "".join(m.get("content", "") or "" for m in messages)
             )
 
-    # ── Budget ──────────────────────────────────────────────
-    def _budget_truncate(self, messages: list["Message"]) -> list["Message"]:
-        """渐进截断工具结果：50-70% → 30KB, >70% → 15KB。"""
+    # ── Offload ─────────────────────────────────────────────
+    def _offload_large_results(self, messages: list["Message"]) -> list["Message"]:
+        """大工具结果落盘，消息中只保留摘要 + read() 路径（可恢复）。"""
         tokens = self.estimate_tokens_raw(messages)
         ratio = self._fill_ratio(tokens)
 
+        # 根据上下文压力设置阈值
         if ratio < 0.5:
-            limit = MAX_TOOL_RESULT_CHARS
+            threshold = OFFLOAD_SIZE_THRESHOLD * 3
         elif ratio < 0.7:
-            limit = BUDGET_TIER1_CHARS
+            threshold = OFFLOAD_SIZE_THRESHOLD
         else:
-            limit = BUDGET_TIER2_CHARS
+            threshold = OFFLOAD_SIZE_THRESHOLD // 2
 
-        truncated = []
+        result: list[Message] = []
         for msg in messages:
-            if not isinstance(msg, ToolMessage) or len(msg.content) <= limit:
-                truncated.append(msg)
-                continue
-
-            if msg.name in ("read", "webread"):
-                truncated.append(self._truncate_readlike(msg, limit))
-            elif msg.name == "glob":
-                truncated.append(self._truncate_glob(msg, limit))
-            elif msg.name == "grep":
-                truncated.append(self._truncate_grep(msg, limit))
-            elif msg.name == "websearch":
-                truncated.append(self._truncate_websearch(msg, limit))
+            if isinstance(msg, ToolMessage) and msg.content and len(msg.content) > threshold:
+                result.append(self._offload_one(msg))
             else:
-                truncated.append(self._truncate_default(msg, limit))
-        return truncated
+                result.append(msg)
+        return result
 
-    # ── 各工具截断策略 ──────────────────────────────────────
+    def _offload_one(self, msg: ToolMessage) -> ToolMessage:
+        """保存完整结果到磁盘，返回摘要消息。"""
+        content = msg.content or ""
+        tool_name = msg.name or "unknown"
+        tool_id = msg.tool_call_id or uuid.uuid4().hex[:8]
+
+        os.makedirs(self.offload_dir, exist_ok=True)
+        filename = f"{tool_name}_{tool_id}.txt"
+        filepath = os.path.join(self.offload_dir, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        # 按工具类型生成摘要
+        summary = self._summarize(msg, max_chars=OFFLOAD_HEAD_CHARS)
+        hint = (
+            f"[Offloaded: {len(content)} chars → {filepath}]\n"
+            f"Use read(path=\"{filepath}\") to view full result.\n\n"
+            f"{summary}"
+        )
+        return ToolMessage(content=hint, tool_call_id=msg.tool_call_id, name=msg.name)
+
+    # ── summarize helpers ────────────────────────────────
 
     @staticmethod
-    def _truncate_readlike(msg: ToolMessage, limit: int) -> ToolMessage:
-        """read/webread: 保留头尾 + 行范围提示。"""
-        half = limit // 2
-        head = msg.content[:half]
-        tail = msg.content[-half:]
-        # 解析 [Lines X-Y of Z] 头部
-        if msg.content.startswith("[Lines "):
-            try:
-                end = msg.content.index("]")
-                inner = msg.content[7:end]  # e.g. "0-199 of 200"
-                range_part, _, total_str = inner.partition(" of ")
-                total = int(total_str)
-                head_lines = head.count("\n") + 1
-                tail_lines = tail.count("\n") + 1
-                tail_start = total - tail_lines
-                info = (
-                    f", missing lines {head_lines}-{tail_start - 1} of {total}. "
-                    f"Use read(path, offset={head_lines}, limit=N)"
-                )
-            except Exception:
-                info = f", showing first and last {len(head)}"
+    def _summarize(msg: ToolMessage, max_chars: int) -> str:
+        """按工具类型生成摘要。"""
+        name = msg.name or ""
+        content = msg.content or ""
+
+        if name in ("read", "webread"):
+            return ContextGuard._summarize_readlike(content, max_chars)
+        elif name == "glob":
+            return ContextGuard._summarize_glob(content, max_chars)
+        elif name == "grep":
+            return ContextGuard._summarize_grep(content, max_chars)
+        elif name == "websearch":
+            return ContextGuard._summarize_websearch(content, max_chars)
         else:
-            info = f", showing first and last {len(head)}"
-        return ToolMessage(
-            content=f"{head}\n\n...[{len(msg.content)} chars]{info}\n\n{tail}",
-            tool_call_id=msg.tool_call_id,
-            name=msg.name,
-        )
+            return content[:max_chars] + ("..." if len(content) > max_chars else "")
 
     @staticmethod
-    def _truncate_glob(msg: ToolMessage, limit: int) -> ToolMessage:
-        """glob: 按行保留所有文件名，中间省略。"""
-        lines = msg.content.split("\n")
-        if len(lines) <= 2:
-            return msg
-        half = max(2, limit // len(lines[0]) if lines[0] else limit // 20)
-        head = lines[:half]
-        tail = lines[-half:]
-        omitted = len(lines) - half * 2
-        new_content = "\n".join(head) + f"\n...[{omitted} files omitted]\n" + "\n".join(tail)
-        return ToolMessage(
-            content=new_content,
-            tool_call_id=msg.tool_call_id,
-            name=msg.name,
-        )
+    def _summarize_readlike(content: str, max_chars: int) -> str:
+        """read/webread: 保留行范围信息 + 开头摘要。"""
+        lines_header = ""
+        body = content
+        if content.startswith("[Lines ") or content.startswith("[Line "):
+            end = content.find("]\n")
+            if end != -1:
+                lines_header = content[:end + 1] + "\n"
+                body = content[end + 2:]
+
+        # 取开头 + 结尾各一半
+        half = max_chars // 2
+        head = body[:half]
+        tail = body[-half:] if len(body) > half else ""
+        sep = "\n...\n" if tail else ""
+        return lines_header + head + sep + tail
 
     @staticmethod
-    def _truncate_grep(msg: ToolMessage, limit: int) -> ToolMessage:
-        """grep: 每条匹配独立，保留前 N 条和后 N 条。"""
-        lines = msg.content.split("\n")
-        if len(lines) <= 3:
-            return msg
-        keep = max(3, min(50, limit // 200))
-        head = lines[:keep]
-        tail = lines[-keep:]
-        omitted = len(lines) - keep * 2
-        new_content = "\n".join(head) + f"\n...[{omitted} matches omitted]\n" + "\n".join(tail)
-        return ToolMessage(
-            content=new_content,
-            tool_call_id=msg.tool_call_id,
-            name=msg.name,
-        )
+    def _summarize_glob(content: str, max_chars: int) -> str:
+        """glob: 列出文件数量 + 前几个。"""
+        lines = content.strip().split("\n")
+        total = len(lines)
+        kept = []
+        for line in lines:
+            if len("\n".join(kept + [line])) > max_chars:
+                kept.append(f"... and {total - len(kept)} more files")
+                break
+            kept.append(line)
+        return "\n".join(kept)
 
     @staticmethod
-    def _truncate_websearch(msg: ToolMessage, limit: int) -> ToolMessage:
-        """websearch: 保留前几条完整结果，省略中间。"""
-        # websearch 结果格式：1. **title**\n   url\n   snippet\n\n
-        entries = msg.content.split("\n\n")
-        if len(entries) <= 4:
-            return msg
-        keep = max(2, len(entries) // 3)
-        head = entries[:keep]
-        tail = entries[-1:]
-        omitted = len(entries) - keep - 1
-        new_content = "\n\n".join(head) + f"\n\n...[{omitted} results omitted]\n\n" + "\n\n".join(tail)
-        return ToolMessage(
-            content=new_content,
-            tool_call_id=msg.tool_call_id,
-            name=msg.name,
-        )
+    def _summarize_grep(content: str, max_chars: int) -> str:
+        """grep: 匹配数量 + 前几条。"""
+        lines = content.strip().split("\n")
+        total = len(lines)
+        kept = []
+        for line in lines:
+            if len("\n".join(kept + [line])) > max_chars:
+                kept.append(f"... and {total - len(kept)} more matches")
+                break
+            kept.append(line)
+        return "\n".join(kept)
 
     @staticmethod
-    def _truncate_default(msg: ToolMessage, limit: int) -> ToolMessage:
-        """默认: 保留头尾。"""
-        half = limit // 2
-        head = msg.content[:half]
-        tail = msg.content[-half:]
-        return ToolMessage(
-            content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
-            tool_call_id=msg.tool_call_id,
-            name=msg.name,
-        )
+    def _summarize_websearch(content: str, max_chars: int) -> str:
+        """websearch: 结果数量 + 前几条。"""
+        entries = content.split("\n\n")
+        total = len(entries)
+        kept = []
+        for entry in entries:
+            if len("\n\n".join(kept + [entry])) > max_chars:
+                kept.append(f"... and {total - len(kept)} more results")
+                break
+            kept.append(entry)
+        return "\n\n".join(kept)
 
     def estimate_tokens_raw(self, messages: list["Message"]) -> int:
         """估算原始消息列表的 token（不通过 state）。"""
@@ -296,24 +296,24 @@ class ContextGuard:
 
     # ── Main check ────────────────────────────────────────────
     async def check_and_compact(self, state: "SessionState") -> "SessionState":
-        """4 阶段压缩：零成本优先。"""
+        """4 阶段压缩：Offload 落盘 → Snip 去重 → Microcompact 清旧 → Autocompact 总结。"""
         tokens = self.estimate_tokens(state)
 
         # 未超限
         if tokens < self.token_threshold:
             return state
 
-        # Budget — 渐进截断工具结果
-        state.messages = self._budget_truncate(state.messages)
+        # Offload — 大结果落盘（无损：read 可恢复）
+        state.messages = self._offload_large_results(state.messages)
         if self.estimate_tokens(state) < self.token_threshold:
             return state
 
-        # Snip — 替换重复读取
+        # Snip — 替换重复读取（无损：保留最后一次完整内容）
         state.messages = self._snip_duplicates(state.messages)
         if self.estimate_tokens(state) < self.token_threshold:
             return state
 
-        # Microcompact — 清理旧工具结果
+        # Microcompact — 清理旧工具结果（无损：只删旧数据）
         now = time.time()
         if now - self._last_activity > MICROCOMPACT_IDLE_SECONDS:
             state.messages = self._microcompact(state.messages)
