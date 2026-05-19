@@ -49,7 +49,6 @@ class CronWorker(Worker):
                 self.context.tool_registry,
                 self.context.history_manager,
                 prompt_builder=self.context.prompt_builder,
-                context=self.context,
             )
             cron_source = CronEventSource(cron_id=cron_def.id)
             session = agent.new_session(source=cron_source)
