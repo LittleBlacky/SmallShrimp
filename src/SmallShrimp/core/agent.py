@@ -57,6 +57,19 @@ class Agent:
         )
         return AgentSession(agent=self, state=state)
 
+    def resume_session(self, session_id: str) -> "AgentSession":
+        """恢复已有会话。"""
+        messages = []
+        if self.history_manager:
+            messages = self.history_manager.load(session_id)
+        state = SessionState(
+            session_id=session_id,
+            agent=self,
+            messages=messages,
+            shared_context=getattr(self, 'shared_context', None),
+        )
+        return AgentSession(agent=self, state=state)
+
 @dataclass
 class AgentSession:
 

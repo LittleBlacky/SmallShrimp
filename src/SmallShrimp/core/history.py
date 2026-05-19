@@ -96,6 +96,24 @@ class HistoryManager:
             data = {
                 "session_id": session_id,
                 "messages": [],
+                "source": source,
                 "updated_at": datetime.now().isoformat(),
             }
             file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+    def get_session_info(self, session_id: str) -> dict | None:
+        """获取会话元信息，不加载完整历史。"""
+        file_path = self.sessions_dir / f"{session_id}.json"
+        if not file_path.exists():
+            return None
+        try:
+            data = json.loads(file_path.read_text())
+            return {
+                "session_id": data.get("session_id", session_id),
+                "source": data.get("source", ""),
+                "message_count": len(data.get("messages", [])),
+                "agent_id": data.get("agent_id", "pickle"),
+                "updated_at": data.get("updated_at", ""),
+            }
+        except Exception:
+            return None
