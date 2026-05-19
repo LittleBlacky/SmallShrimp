@@ -43,11 +43,12 @@ def test_fill_ratio():
 
 def test_budget_truncate_read_hint():
     guard = ContextGuard(context_window=100000)
-    msg = ToolMessage(content="A" * 12000, tool_call_id="c1", name="read")
+    content = "line1\nline2\nline3\n" + ("x" * 11000)
+    msg = ToolMessage(content=content, tool_call_id="c1", name="read")
     result = guard._budget_truncate([msg])
     assert "File truncated" in result[0].content
+    assert "lines total" in result[0].content
     assert "offset" in result[0].content.lower()
-    assert "limit" in result[0].content.lower()
 
 
 def test_budget_truncate_head_tail():

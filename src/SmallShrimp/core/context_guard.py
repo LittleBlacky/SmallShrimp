@@ -81,11 +81,14 @@ class ContextGuard:
         for msg in messages:
             if isinstance(msg, ToolMessage) and len(msg.content) > limit:
                 if msg.name == "read":
+                    shown = msg.content[:limit // 2]
+                    shown_lines = shown.count("\n") + 1
+                    total_lines = msg.content.count("\n") + 1
                     truncated.append(ToolMessage(
                         content=(
-                            f"{msg.content[:limit // 2]}\n\n"
-                            f"[File truncated: {len(msg.content)} chars total. "
-                            f"Use read(path, offset=N, limit=N) to read specific sections.]"
+                            f"{shown}\n\n"
+                            f"[File truncated: {total_lines} lines total, showing lines 0-{shown_lines - 1}. "
+                            f"Continue with read(path, offset={shown_lines}, limit=N)]"
                         ),
                         tool_call_id=msg.tool_call_id,
                         name=msg.name,

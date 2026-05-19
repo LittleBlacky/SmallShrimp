@@ -2,7 +2,7 @@
 from pathlib import Path
 from ..tools.decorators import tool
 
-@tool(name="read", description="Read the contents of a file. Use offset and limit to read specific sections.")
+@tool(name="read", description="Read a file. offset/limit are line numbers. With no params returns whole file.")
 async def read(path: str, offset: int = 0, limit: int | None = None) -> str:
     """读取文件内容。offset 起始行，limit 最大行数。"""
     file_path = Path(path)
