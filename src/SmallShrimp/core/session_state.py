@@ -2,10 +2,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from ..core.agent import Agent
-    from ..core.context import SharedContext
     from ..core.events import EventSource
+    from ..core.history import HistoryManager
+    from ..core.prompt_builder import PromptBuilder
 
 from ..core.message import Message, HumanMessage, AssistantMessage, SystemMessage
 
@@ -17,7 +20,8 @@ class SessionState:
     messages: list[Message] = field(default_factory=list)
     pending_reasoning_content: Optional[str] = None  # 待传回的 reasoning_content
     source: Optional["EventSource"] = None
-    shared_context: Optional["SharedContext"] = None
+    history_manager: Optional["HistoryManager"] = None
+    prompt_builder: Optional["PromptBuilder"] = None
 
     def add_user_message(self, content: str) -> None:
         self.messages.append(HumanMessage(content=content))
@@ -28,8 +32,8 @@ class SessionState:
     def add_message(self, message: Message) -> None:
         self.messages.append(message)
         # 持久化到历史记录
-        if self.shared_context and self.shared_context.history_manager:
-            self.shared_context.history_manager.append(
+        if self.history_manager:
+            self.history_manager.append(
                 self.session_id, message.to_dict()
             )
 
@@ -84,8 +88,8 @@ class SessionState:
     def _build_system_prompt(self) -> str:
         """从 Agent 定义构建系统提示，优先使用 PromptBuilder。"""
         # 优先使用 PromptBuilder（多层提示词）
-        if self.shared_context and hasattr(self.shared_context, 'prompt_builder'):
-            return self.shared_context.prompt_builder.build(self)
+        if self.prompt_builder:
+            return self.prompt_builder.build(self)
 
         # 回退：旧版简单构建
         agent_def = self.agent.agent_def

@@ -14,7 +14,7 @@ from .worker import SubscriberWorker
 from ..core.events import Event, EventSource, InboundEvent, OutboundEvent
 
 if TYPE_CHECKING:
-    from ..server.context import Context
+    from .context import Context
 
 logger = logging.getLogger(__name__)
 

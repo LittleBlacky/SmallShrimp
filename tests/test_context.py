@@ -1,88 +1,70 @@
 from __future__ import annotations
-"""SharedContext 测试。"""
-import pytest
-from unittest.mock import MagicMock
+"""Context 测试。"""
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 
-def test_shared_context_init():
-    """测试 SharedContext 初始化。"""
-    from src.SmallShrimp.core.context import SharedContext
+def test_context_from_workspace():
+    """测试从工作区创建 Context。"""
+    from src.SmallShrimp.server.context import Context
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ws = Path(tmpdir)
+        (ws / "config.user.yaml").write_text("default_provider: openai\nproviders:\n  openai:\n    api_key: test\n")
+        (ws / "agents").mkdir()
+        (ws / "skills").mkdir()
+        (ws / "sessions").mkdir()
+        (ws / "memories").mkdir()
+
+        context = Context.from_workspace(ws)
+
+        assert context.config is not None
+        assert context.agent_loader is not None
+        assert context.skill_loader is not None
+        assert context.history_manager is not None
+        assert context.tool_registry is not None
+        assert context.eventbus is not None
+        assert context.command_registry is not None
+        assert context.prompt_builder is not None
+        assert context.memory_manager is not None
+        assert context.channels == []
+
+
+def test_context_dataclass_manual():
+    """测试手动创建 Context dataclass。"""
+    from src.SmallShrimp.server.context import Context
 
     config = MagicMock()
-    config.get = MagicMock(return_value="workspace/sessions")
-    config.get_provider_config = MagicMock(return_value={"api_key": "test"})
+    agent_loader = MagicMock()
+    skill_loader = MagicMock()
+    history_manager = MagicMock()
+    tool_registry = MagicMock()
+    eventbus = MagicMock()
+    command_registry = MagicMock()
+    prompt_builder = MagicMock()
+    memory_manager = MagicMock()
 
-    context = SharedContext(config)
+    context = Context(
+        config=config,
+        agent_loader=agent_loader,
+        skill_loader=skill_loader,
+        history_manager=history_manager,
+        tool_registry=tool_registry,
+        eventbus=eventbus,
+        command_registry=command_registry,
+        prompt_builder=prompt_builder,
+        memory_manager=memory_manager,
+    )
 
-    assert context.agent_loader is not None
-    assert context.skill_loader is not None
-    assert context.eventbus is not None
-    assert context.prompt_builder is not None
-    assert context.command_registry is not None
-
-
-def test_shared_context_default_channels():
-    """测试默认 channels 为空列表。"""
-    from src.SmallShrimp.core.context import SharedContext
-
-    config = MagicMock()
-    config.get = MagicMock(return_value="workspace/sessions")
-
-    context = SharedContext(config)
+    assert context.agent_loader is agent_loader
+    assert context.eventbus is eventbus
+    assert context.workspace == Path("workspace")
     assert context.channels == []
-
-
-def test_shared_context_custom_channels():
-    """测试自定义 channels。"""
-    from src.SmallShrimp.core.context import SharedContext
-
-    config = MagicMock()
-    config.get = MagicMock(return_value="workspace/sessions")
-
-    channel = MagicMock()
-    context = SharedContext(config, channels=[channel])
-    assert len(context.channels) == 1
-    assert context.channels[0] is channel
-
-
-def test_subscribe():
-    """测试事件订阅。"""
-    from src.SmallShrimp.core.context import SharedContext
-    from src.SmallShrimp.core.events import OutboundEvent
-
-    config = MagicMock()
-    config.get = MagicMock(return_value="workspace/sessions")
-
-    context = SharedContext(config)
-
-    handler = MagicMock()
-    context.subscribe(OutboundEvent, handler)
-
-    assert OutboundEvent in context.eventbus._subscribers
-
-
-def test_publish():
-    """测试事件发布。"""
-    from src.SmallShrimp.core.context import SharedContext
-    from src.SmallShrimp.core.events import OutboundEvent, CliEventSource
-
-    config = MagicMock()
-    config.get = MagicMock(return_value="workspace/sessions")
-
-    context = SharedContext(config)
-
-    async def run_test():
-        event = OutboundEvent(session_id="test", source=CliEventSource(), content="test content")
-        await context.publish(event)
-
-    import asyncio
-    asyncio.run(run_test())
+    assert context.websocket_worker is None
 
 
 if __name__ == "__main__":
-    test_shared_context_init()
-    test_shared_context_default_channels()
-    test_shared_context_custom_channels()
-    test_subscribe()
+    test_context_from_workspace()
+    test_context_dataclass_manual()
     print("\nAll test_context tests passed!")

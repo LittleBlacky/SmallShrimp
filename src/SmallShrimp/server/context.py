@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from ..core.history import HistoryManager
     from ..core.eventbus import EventBus
     from ..core.commands.registry import CommandRegistry
+    from ..core.prompt_builder import PromptBuilder
+    from ..core.memory import MemoryManager
+    from ..core.skill_loader import SkillLoader
     from ..tools.registry import ToolRegistry
     from ..utils.config import Config
     from ..channels.base import Channel
@@ -17,24 +20,31 @@ if TYPE_CHECKING:
 @dataclass
 class Context:
     """应用上下文，用于依赖注入。"""
+
     config: "Config"
     agent_loader: "AgentLoader"
+    skill_loader: "SkillLoader"
     history_manager: "HistoryManager"
     tool_registry: "ToolRegistry"
     eventbus: "EventBus"
     command_registry: "CommandRegistry"
+    prompt_builder: "PromptBuilder"
+    memory_manager: "MemoryManager"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
     channels: list["Channel"] = field(default_factory=list)
     websocket_worker: "WebSocketWorker | None" = field(default=None)
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> "Context":
-        """从工作区路径创建 Context。"""
+        """从工作区路径创建完整的 Context。"""
         from ..utils.config import Config
         from ..core.agent_loader import AgentLoader
+        from ..core.skill_loader import SkillLoader
         from ..core.history import HistoryManager
         from ..core.eventbus import EventBus
         from ..core.commands.registry import CommandRegistry
+        from ..core.prompt_builder import PromptBuilder
+        from ..core.memory import MemoryManager
         from ..tools import create_tool_registry
         from ..channels import create_channels_from_config
 
@@ -42,8 +52,14 @@ class Context:
         config.workspace = workspace
 
         agent_loader = AgentLoader(workspace / "agents")
+        skill_loader = SkillLoader(workspace / "skills")
         history_manager = HistoryManager(workspace / "sessions")
-        eventbus = EventBus()
+        prompt_builder = PromptBuilder(workspace)
+        memory_manager = MemoryManager(workspace / "memories")
+
+        # 事件总线
+        pending_dir = workspace / "events" / "pending"
+        eventbus = EventBus(pending_dir)
         command_registry = CommandRegistry()
 
         # 创建工具注册表
@@ -57,10 +73,13 @@ class Context:
         return cls(
             config=config,
             agent_loader=agent_loader,
+            skill_loader=skill_loader,
             history_manager=history_manager,
             tool_registry=tool_registry,
             eventbus=eventbus,
             command_registry=command_registry,
+            prompt_builder=prompt_builder,
+            memory_manager=memory_manager,
             workspace=workspace,
             channels=channels,
         )

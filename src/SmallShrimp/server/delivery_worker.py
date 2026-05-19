@@ -10,7 +10,7 @@ from ..core.events import OutboundEvent
 from .worker import SubscriberWorker
 
 if TYPE_CHECKING:
-    from ..server.context import Context
+    from .context import Context
     from ..channels.base import Channel
 
 logger = logging.getLogger(__name__)

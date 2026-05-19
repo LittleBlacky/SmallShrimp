@@ -9,10 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 
 from .events import Event, OutboundEvent, deserialize_event
-from ..server.worker import Worker
-
-if TYPE_CHECKING:
-    from ..server.context import Context
+from .worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +20,18 @@ Handler = Callable[[Event], Awaitable[None]]
 class EventBus(Worker):
     """事件总线，支持订阅和异步分发。"""
 
-    def __init__(self, context: "Context | None" = None) -> None:
-        super().__init__(context)
-        self.context = context
+    def __init__(self, pending_dir: Path | None = None) -> None:
+        super().__init__()
         self._subscribers: dict[type[Event], list[Handler]] = defaultdict(list)
-        self._queue: asyncio.Queue[Event] = asyncio.Queue()
+        # 尝试初始化队列，在没有事件循环的测试环境中会失败
+        try:
+            self._queue: asyncio.Queue[Event] = asyncio.Queue()
+        except RuntimeError:
+            self._queue: asyncio.Queue[Event] | None = None  # 延迟初始化
 
         # 待投递事件目录（用于持久化和故障恢复）
-        self.pending_dir: Path | None = None
-        if context and hasattr(context, "config") and context.config:
-            self.pending_dir = context.config.workspace / "events" / "pending"
+        self.pending_dir = pending_dir
+        if self.pending_dir:
             self.pending_dir.mkdir(parents=True, exist_ok=True)
 
     def subscribe(self, event_class: type[E], handler: Callable[[E], Awaitable[None]]) -> None:
@@ -49,11 +48,15 @@ class EventBus(Worker):
 
     async def publish(self, event: Event) -> None:
         """发布事件到内部队列（非阻塞）。"""
+        if self._queue is None:
+            self._queue = asyncio.Queue()
         await self._queue.put(event)
         logger.debug(f"已入队 {event.__class__.__name__} 事件")
 
     async def run(self) -> None:
         """从队列中处理事件。"""
+        if self._queue is None:
+            self._queue = asyncio.Queue()
         logger.info("EventBus 已启动")
 
         # 启动时恢复待投递事件

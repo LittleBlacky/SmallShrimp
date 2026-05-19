@@ -8,7 +8,7 @@ from ..core.events import EventSource, InboundEvent
 from .worker import Worker
 
 if TYPE_CHECKING:
-    from ..server.context import Context
+    from .context import Context
 
 
 class ChannelWorker(Worker):

@@ -1,4 +1,5 @@
 """工具装饰器。"""
+from __future__ import annotations
 from functools import wraps
 from inspect import signature, Parameter
 from typing import Callable, Any

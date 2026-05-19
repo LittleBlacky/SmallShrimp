@@ -28,7 +28,7 @@ def create_app(context: Context) -> FastAPI:
         """WebSocket 端点，用于实时事件流和聊天。"""
         await websocket.accept()
 
-        if not hasattr(context, "websocket_worker") or context.websocket_worker is None:
+        if context.websocket_worker is None:
             await websocket.close(code=1013, reason="WebSocket 不可用")
             return
 
@@ -37,6 +37,6 @@ def create_app(context: Context) -> FastAPI:
     @app.get("/health")
     async def health_check():
         """健康检查端点。"""
-        return {"status": "ok", "clients": len(context.websocket_worker.clients) if hasattr(context, "websocket_worker") else 0}
+        return {"status": "ok", "clients": len(context.websocket_worker.clients) if context.websocket_worker else 0}
 
     return app

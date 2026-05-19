@@ -8,7 +8,6 @@ import pytest
 
 from src.SmallShrimp.core.prompt_builder import PromptBuilder
 from src.SmallShrimp.core.session_state import SessionState
-from src.SmallShrimp.core.context import SharedContext
 from src.SmallShrimp.core.events import CliEventSource
 from src.SmallShrimp.utils.config import Config
 from src.SmallShrimp.utils.def_loader import AgentDef
@@ -130,14 +129,13 @@ You are Simple.
 def test_prompt_builder_includes_identity(simple_agent_def, temp_workspace):
     """PromptBuilder should include agent_md as the identity layer."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-1",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -148,8 +146,7 @@ def test_prompt_builder_includes_identity(simple_agent_def, temp_workspace):
 def test_prompt_builder_includes_soul(simple_agent_def, temp_workspace):
     """PromptBuilder should append SOUL.md as personality layer."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     agent_def = AgentDef(
         id="poet",
@@ -164,7 +161,7 @@ def test_prompt_builder_includes_soul(simple_agent_def, temp_workspace):
         session_id="test-2",
         agent=_fake_agent(agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -175,14 +172,13 @@ def test_prompt_builder_includes_soul(simple_agent_def, temp_workspace):
 def test_prompt_builder_includes_runtime_layer(simple_agent_def, temp_workspace):
     """PromptBuilder should include Runtime section with agent id and timestamp."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-3",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -193,14 +189,13 @@ def test_prompt_builder_includes_runtime_layer(simple_agent_def, temp_workspace)
 def test_prompt_builder_includes_channel_hint_cli(simple_agent_def, temp_workspace):
     """PromptBuilder should detect CLI source and include platform hint."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-4",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -213,14 +208,13 @@ def test_prompt_builder_loads_bootstrap_files(simple_agent_def, temp_workspace):
     (ws / "BOOTSTRAP.md").write_text("# Bootstrap\n\nWelcome to the system.")
     (ws / "AGENTS.md").write_text("# Agents\n\nAvailable agents list.")
 
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-5",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -231,14 +225,13 @@ def test_prompt_builder_loads_bootstrap_files(simple_agent_def, temp_workspace):
 def test_prompt_builder_no_bootstrap_when_missing(simple_agent_def, temp_workspace):
     """PromptBuilder should work fine without BOOTSTRAP.md/AGENTS.md."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
-    pb = PromptBuilder(ctx)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-6",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
 
     prompt = pb.build(state)
@@ -257,7 +250,7 @@ def test_prompt_builder_fallback_legacy():
         llm={"provider": "openai"},
     )
 
-    pb = PromptBuilder(None)  # context not needed for legacy path
+    pb = PromptBuilder(Path("."))  # workspace path for legacy test
     result = pb._build_legacy_identity(agent_def)
 
     assert "LegacyAgent" in result
@@ -274,13 +267,13 @@ def test_prompt_builder_fallback_legacy():
 def test_session_build_messages_uses_prompt_builder(simple_agent_def, temp_workspace):
     """SessionState._build_system_prompt() should delegate to PromptBuilder."""
     ws, config = temp_workspace
-    ctx = SharedContext(config)
+    pb = PromptBuilder(ws)
 
     state = SessionState(
         session_id="test-7",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        shared_context=ctx,
+        prompt_builder=pb,
     )
     state.add_user_message("Hello")
 
@@ -299,7 +292,7 @@ def test_session_fallback_when_no_prompt_builder(simple_agent_def):
         session_id="test-8",
         agent=_fake_agent(simple_agent_def),
         source=CliEventSource(),
-        # shared_context is None → no prompt_builder
+        # prompt_builder is None → fallback
     )
     state.add_user_message("Hi")
 

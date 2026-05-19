@@ -4,8 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pathlib import Path
+
 if TYPE_CHECKING:
-    from .context import SharedContext
     from .events import EventSource
     from .session_state import SessionState
 
@@ -21,8 +22,8 @@ class PromptBuilder:
     5. Channel hint: platform/cron/agent context
     """
 
-    def __init__(self, context: "SharedContext") -> None:
-        self.context = context
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
 
     def build(self, state: "SessionState") -> str:
         """Build the full system prompt from layers."""
@@ -81,13 +82,12 @@ class PromptBuilder:
     def _load_bootstrap_context(self) -> str:
         """Load BOOTSTRAP.md + AGENTS.md from workspace."""
         parts: list[str] = []
-        workspace = self.context.config.workspace
 
-        bootstrap_path = workspace / "BOOTSTRAP.md"
+        bootstrap_path = self.workspace / "BOOTSTRAP.md"
         if bootstrap_path.exists():
             parts.append(bootstrap_path.read_text(encoding="utf-8").strip())
 
-        agents_path = workspace / "AGENTS.md"
+        agents_path = self.workspace / "AGENTS.md"
         if agents_path.exists():
             parts.append(agents_path.read_text(encoding="utf-8").strip())
 

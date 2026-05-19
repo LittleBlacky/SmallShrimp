@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -15,18 +16,26 @@ if TYPE_CHECKING:
     
 class Agent:
 
-    def __init__(self, agent_def: "AgentDef", config: "Config", tool_registry: "ToolRegistry", history_manager: "HistoryManager", shared_context: "SharedContext | None" = None) -> None:
+    def __init__(
+        self,
+        agent_def: "AgentDef",
+        config: "Config",
+        tool_registry: "ToolRegistry",
+        history_manager: "HistoryManager",
+        prompt_builder: "PromptBuilder | None" = None,
+        context_guard: "ContextGuard | None" = None,
+    ) -> None:
         self.agent_def = agent_def
         self.config = config
         self.llm: "LLMProvider" = self._create_llm()
         self.tool_registry = tool_registry
         self.history_manager = history_manager
-        self.shared_context = shared_context
+        self.prompt_builder = prompt_builder
         # 从 agent_def 获取 context_window 的 80% 作为压缩阈值
         context_window = agent_def.llm.get("context_window", 200000)
         token_threshold = int(context_window * 0.8)
         from ..core.context_guard import ContextGuard
-        self.context_guard = ContextGuard(token_threshold=token_threshold)
+        self.context_guard = ContextGuard(token_threshold=token_threshold) if context_guard is None else context_guard
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -52,7 +61,8 @@ class Agent:
             session_id=session_id,
             agent=self,
             messages=[],
-            shared_context=getattr(self, 'shared_context', None),
+            history_manager=self.history_manager,
+            prompt_builder=self.prompt_builder,
             source=source,
         )
         return AgentSession(agent=self, state=state)

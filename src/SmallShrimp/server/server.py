@@ -12,9 +12,7 @@ from .delivery_worker import DeliveryWorker
 from .channel_worker import ChannelWorker
 from .websocket_worker import WebSocketWorker
 from .app import create_app
-
-if TYPE_CHECKING:
-    from .context import Context
+from .context import Context
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 class Server:
     """协调所有 Workers 的服务器。"""
 
-    def __init__(self, context: "Context"):
+    def __init__(self, context: Context):
         self.context = context
         self.workers: list[Worker] = []
         self._api_task: asyncio.Task | None = None
