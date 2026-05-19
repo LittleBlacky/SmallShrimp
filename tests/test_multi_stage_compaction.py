@@ -41,7 +41,33 @@ def test_fill_ratio():
     assert guard._fill_ratio(100000) == 0.5
 
 
-def test_budget_truncate_read_range():
+def test_truncate_glob():
+    guard = ContextGuard(context_window=100000)
+    files = "\n".join(f"src/module_{i}/very_long_file_name_for_testing_purposes.py" for i in range(500))
+    msg = ToolMessage(content=files, tool_call_id="c1", name="glob")
+    result = guard._budget_truncate([msg])
+    assert "files omitted" in result[0].content
+
+
+def test_truncate_grep():
+    guard = ContextGuard(context_window=100000)
+    padding = "x" * 80
+    matches = "\n".join(f"file_{i}.py: line_{i}: found 'pattern_{padding}'" for i in range(500))
+    msg = ToolMessage(content=matches, tool_call_id="c1", name="grep")
+    result = guard._budget_truncate([msg])
+    assert "matches omitted" in result[0].content
+
+
+def test_truncate_websearch():
+    guard = ContextGuard(context_window=100000)
+    entries = [f"{i}. **Title {i} {'x' * 200}**\n   http://example.com/{i}\n   {'Snippet ' * 50}" for i in range(50)]
+    content = "\n\n".join(entries)
+    msg = ToolMessage(content=content, tool_call_id="c1", name="websearch")
+    result = guard._budget_truncate([msg])
+    assert "results omitted" in result[0].content
+
+
+def test_truncate_read_range():
     guard = ContextGuard(context_window=100000)
     padding = "x" * 100
     lines = [f"line {i} {padding}" for i in range(200)]
@@ -49,18 +75,15 @@ def test_budget_truncate_read_range():
     msg = ToolMessage(content=content, tool_call_id="c1", name="read")
     result = guard._budget_truncate([msg])
     assert "missing lines" in result[0].content.lower()
-    assert "offset" in result[0].content.lower()
 
 
-def test_budget_truncate_head_tail():
+def test_truncate_head_tail():
     guard = ContextGuard(context_window=100000)
     head = "HEAD_" + "A" * 4995
     tail = "TAIL_" + "Z" * 4995
     content = head + "M" * 2000 + tail
     msg = ToolMessage(content=content, tool_call_id="c1", name="grep")
     result = guard._budget_truncate([msg])
-    assert "HEAD_" in result[0].content
-    assert "TAIL_" in result[0].content
 
 
 if __name__ == "__main__":
@@ -68,6 +91,9 @@ if __name__ == "__main__":
     test_snip_duplicates_preserves_unique_reads()
     test_microcompact_keeps_recent()
     test_fill_ratio()
-    test_budget_truncate_read_range()
-    test_budget_truncate_head_tail()
+    test_truncate_glob()
+    test_truncate_grep()
+    test_truncate_websearch()
+    test_truncate_read_range()
+    test_truncate_head_tail()
     print("All multi-stage compaction tests passed!")

@@ -79,39 +79,117 @@ class ContextGuard:
 
         truncated = []
         for msg in messages:
-            if isinstance(msg, ToolMessage) and len(msg.content) > limit:
-                half = limit // 2
-                head = msg.content[:half]
-                tail = msg.content[-half:]
-                line_info = self._read_line_range(msg.content, head, tail)
-                truncated.append(ToolMessage(
-                    content=f"{head}\n\n...[{len(msg.content)} chars]{line_info}\n\n{tail}",
-                    tool_call_id=msg.tool_call_id,
-                    name=msg.name,
-                ))
-            else:
+            if not isinstance(msg, ToolMessage) or len(msg.content) <= limit:
                 truncated.append(msg)
+                continue
+
+            if msg.name in ("read", "webread"):
+                truncated.append(self._truncate_readlike(msg, limit))
+            elif msg.name == "glob":
+                truncated.append(self._truncate_glob(msg, limit))
+            elif msg.name == "grep":
+                truncated.append(self._truncate_grep(msg, limit))
+            elif msg.name == "websearch":
+                truncated.append(self._truncate_websearch(msg, limit))
+            else:
+                truncated.append(self._truncate_default(msg, limit))
         return truncated
 
+    # ── 各工具截断策略 ──────────────────────────────────────
+
     @staticmethod
-    def _read_line_range(content: str, head: str, tail: str) -> str:
-        """从 read 结果头部解析行范围，返回缺失区间提示。"""
-        if not content.startswith("[Lines "):
-            return f", showing first and last {len(head)}"
-        try:
-            end = content.index("]")
-            parts = content[7:end].split()
-            total_lines = int(parts[0].split(" of ")[1]) if " of " in parts[0] else int(parts[0].split("-")[-1])
-            head_lines = head.count("\n") + 1
-            tail_lines = tail.count("\n") + 1
-            # 尾部最后一行号约等于 total - 1
-            tail_start = total_lines - tail_lines
-            return (
-                f", missing lines {head_lines}-{tail_start - 1} of {total_lines}. "
-                f"Use read(path, offset={head_lines}, limit=N)"
-            )
-        except Exception:
-            return f", showing first and last {len(head)}"
+    def _truncate_readlike(msg: ToolMessage, limit: int) -> ToolMessage:
+        """read/webread: 保留头尾 + 行范围提示。"""
+        half = limit // 2
+        head = msg.content[:half]
+        tail = msg.content[-half:]
+        # 解析 [Lines X-Y of Z] 头部
+        if msg.content.startswith("[Lines "):
+            try:
+                end = msg.content.index("]")
+                inner = msg.content[7:end]  # e.g. "0-199 of 200"
+                range_part, _, total_str = inner.partition(" of ")
+                total = int(total_str)
+                head_lines = head.count("\n") + 1
+                tail_lines = tail.count("\n") + 1
+                tail_start = total - tail_lines
+                info = (
+                    f", missing lines {head_lines}-{tail_start - 1} of {total}. "
+                    f"Use read(path, offset={head_lines}, limit=N)"
+                )
+            except Exception:
+                info = f", showing first and last {len(head)}"
+        else:
+            info = f", showing first and last {len(head)}"
+        return ToolMessage(
+            content=f"{head}\n\n...[{len(msg.content)} chars]{info}\n\n{tail}",
+            tool_call_id=msg.tool_call_id,
+            name=msg.name,
+        )
+
+    @staticmethod
+    def _truncate_glob(msg: ToolMessage, limit: int) -> ToolMessage:
+        """glob: 按行保留所有文件名，中间省略。"""
+        lines = msg.content.split("\n")
+        if len(lines) <= 2:
+            return msg
+        half = max(2, limit // len(lines[0]) if lines[0] else limit // 20)
+        head = lines[:half]
+        tail = lines[-half:]
+        omitted = len(lines) - half * 2
+        new_content = "\n".join(head) + f"\n...[{omitted} files omitted]\n" + "\n".join(tail)
+        return ToolMessage(
+            content=new_content,
+            tool_call_id=msg.tool_call_id,
+            name=msg.name,
+        )
+
+    @staticmethod
+    def _truncate_grep(msg: ToolMessage, limit: int) -> ToolMessage:
+        """grep: 每条匹配独立，保留前 N 条和后 N 条。"""
+        lines = msg.content.split("\n")
+        if len(lines) <= 3:
+            return msg
+        keep = max(3, min(50, limit // 200))
+        head = lines[:keep]
+        tail = lines[-keep:]
+        omitted = len(lines) - keep * 2
+        new_content = "\n".join(head) + f"\n...[{omitted} matches omitted]\n" + "\n".join(tail)
+        return ToolMessage(
+            content=new_content,
+            tool_call_id=msg.tool_call_id,
+            name=msg.name,
+        )
+
+    @staticmethod
+    def _truncate_websearch(msg: ToolMessage, limit: int) -> ToolMessage:
+        """websearch: 保留前几条完整结果，省略中间。"""
+        # websearch 结果格式：1. **title**\n   url\n   snippet\n\n
+        entries = msg.content.split("\n\n")
+        if len(entries) <= 4:
+            return msg
+        keep = max(2, len(entries) // 3)
+        head = entries[:keep]
+        tail = entries[-1:]
+        omitted = len(entries) - keep - 1
+        new_content = "\n\n".join(head) + f"\n\n...[{omitted} results omitted]\n\n" + "\n\n".join(tail)
+        return ToolMessage(
+            content=new_content,
+            tool_call_id=msg.tool_call_id,
+            name=msg.name,
+        )
+
+    @staticmethod
+    def _truncate_default(msg: ToolMessage, limit: int) -> ToolMessage:
+        """默认: 保留头尾。"""
+        half = limit // 2
+        head = msg.content[:half]
+        tail = msg.content[-half:]
+        return ToolMessage(
+            content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
+            tool_call_id=msg.tool_call_id,
+            name=msg.name,
+        )
 
     def estimate_tokens_raw(self, messages: list["Message"]) -> int:
         """估算原始消息列表的 token（不通过 state）。"""
