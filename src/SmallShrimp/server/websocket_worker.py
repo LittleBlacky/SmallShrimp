@@ -59,7 +59,7 @@ class WebSocketWorker(SubscriberWorker):
                 msg = WebSocketMessage(**data)
 
                 source = WebSocketEventSource(user_id=msg.source)
-                session_id = self._get_or_create_session_id(source)
+                session_id = self.context.routing_table.get_or_create_session_id(source)
 
                 event = InboundEvent(
                     session_id=session_id,
@@ -108,22 +108,3 @@ class WebSocketWorker(SubscriberWorker):
             except Exception as e:
                 self.logger.error(f"发送消息给客户端失败: {e}")
                 self.clients.discard(client)
-
-    def _get_or_create_session_id(self, source: "EventSource") -> str:
-        """获取或创建指定来源的会话 ID（委托给 RoutingTable）。"""
-        if self.context.routing_table:
-            return self.context.routing_table.get_or_create_session_id(source)
-
-        # 回退：无路由表时使用默认 agent
-        from ..utils.config import SourceSessionConfig
-        source_str = str(source)
-        source_session = self.context.config.sources.get(source_str)
-        if source_session:
-            return source_session.session_id
-
-        agent_def = self.context.agent_loader.load(self.context.config.default_agent)
-        from ..core.agent import Agent
-        agent = Agent(agent_def, self.context.config, self.context.tool_registry, self.context.history_manager)
-        session = agent.new_session(source)
-        self.context.config.set_runtime(f"sources.{source_str}", SourceSessionConfig(session_id=session.session_id))
-        return session.session_id
