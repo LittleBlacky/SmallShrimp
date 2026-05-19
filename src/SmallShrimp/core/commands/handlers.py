@@ -1,10 +1,24 @@
 from .registry import register_command
 from ..skill_loader import SkillLoader
+from ..memory import MemoryManager
 
 class CommandContext:
     """命令执行的上下文。"""
     def __init__(self, session: "AgentSession") -> None:
         self.session = session
+        self._memory_manager: MemoryManager | None = None
+
+    @property
+    def memory(self) -> MemoryManager:
+        if self._memory_manager is None:
+            # 从会话获取 memory_dir，或使用默认路径
+            shared = self.session.state.shared_context
+            if shared and hasattr(shared, 'memory_manager'):
+                self._memory_manager = shared.memory_manager
+            else:
+                from pathlib import Path
+                self._memory_manager = MemoryManager(Path("workspace/memories"))
+        return self._memory_manager
 
 @register_command(name="skill", description="加载技能内容", usage="/skill <name>")
 async def cmd_skill(context: CommandContext, args: list[str]) -> str:
@@ -63,3 +77,82 @@ async def cmd_context(context: CommandContext, args: list[str]) -> str:
     percentage = (token_count / guard.token_threshold) * 100
 
     return f"**Messages:** {msg_count}\n**Tokens:** {token_count} ({percentage:.1f}% of {guard.token_threshold} threshold)"
+
+@register_command(name="remember", description="保存记忆", usage="/remember <content>")
+async def cmd_remember(context: CommandContext, args: list[str]) -> str:
+    """保存记忆。"""
+    if not args:
+        return "用法: /remember <内容>\n例如: /remember 用户喜欢用 dark mode"
+    content = " ".join(args)
+    # 尝试提取标签 (#tag 格式)
+    import re
+    tags = re.findall(r"#(\w+)", content)
+    content_clean = re.sub(r"#\w+", "", content).strip()
+
+    record = context.memory.remember(content_clean, tags=tags if tags else None)
+    tag_str = f" [#{'/'.join(tags)}]" if tags else ""
+    return f"✓ 已记住: {record['content'][:100]}{tag_str}"
+
+@register_command(name="recall", description="搜索记忆", usage="/recall <query>")
+async def cmd_recall(context: CommandContext, args: list[str]) -> str:
+    """搜索记忆。"""
+    if not args:
+        return "用法: /recall <查询词>\n例如: /recall dark mode"
+    query = " ".join(args)
+    results = context.memory.recall(query)
+    if not results:
+        return f"没有找到关于 '{query}' 的记忆"
+    lines = [f"找到 {len(results)} 条相关记忆:\n"]
+    for r in results:
+        tags_str = f"[#{'/'.join(r['tags'])}]" if r.get("tags") else ""
+        lines.append(f"  • {r['content'][:80]}... {tags_str}")
+    return "\n".join(lines)
+
+@register_command(name="memories", description="查看所有记忆", usage="/memories")
+async def cmd_memories(context: CommandContext, args: list[str]) -> str:
+    """列出所有记忆。"""
+    records = context.memory.topics.list_all()
+    if not records:
+        return "还没有任何记忆。使用 /remember <内容> 来添加。"
+    lines = [f"共 {len(records)} 条记忆:\n"]
+    for r in records:
+        tags_str = f"[#{'/'.join(r['tags'])}]" if r.get("tags") else ""
+        date_str = r["created_at"][:10]
+        lines.append(f"  [{date_str}] {r['content'][:60]}... {tags_str}")
+    return "\n".join(lines)
+
+@register_command(name="forget", description="删除记忆", usage="/forget <关键词>")
+async def cmd_forget(context: CommandContext, args: list[str]) -> str:
+    """删除记忆。"""
+    if not args:
+        return "用法: /forget <关键词>\n将删除匹配的记忆"
+    query = " ".join(args)
+    results = context.memory.recall(query, limit=20)
+    if not results:
+        return f"没有找到匹配 '{query}' 的记忆"
+    deleted = 0
+    for r in results:
+        if context.memory.topics.delete(r["id"]):
+            deleted += 1
+    return f"已删除 {deleted} 条记忆"
+
+@register_command(name="note", description="写入今日笔记", usage="/note <content>")
+async def cmd_note(context: CommandContext, args: list[str]) -> str:
+    """写入今日笔记。"""
+    if not args:
+        return "用法: /note <内容>\n例如: /note 完成了记忆模块开发"
+    content = " ".join(args)
+    context.memory.today_note(content)
+    return "✓ 已写入今日笔记"
+
+@register_command(name="notes", description="查看近期笔记", usage="/notes [days]")
+async def cmd_notes(context: CommandContext, args: list[str]) -> str:
+    """列出近期笔记。"""
+    limit = int(args[0]) if args else 7
+    notes = context.memory.daily.list_notes(limit=limit)
+    if not notes:
+        return "暂无笔记"
+    lines = [f"近期 {len(notes)} 篇笔记:\n"]
+    for n in notes:
+        lines.append(f"  📅 {n['date']} ({n['size']} bytes)")
+    return "\n".join(lines)
