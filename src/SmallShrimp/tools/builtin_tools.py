@@ -2,15 +2,24 @@
 from pathlib import Path
 from ..tools.decorators import tool
 
-@tool(name="read", description="Read the contents of a file. Returns the full text content.")
-async def read(path: str) -> str:
-    """读取文件内容。"""
+@tool(name="read", description="Read the contents of a file. Use offset and limit to read specific sections.")
+async def read(path: str, offset: int = 0, limit: int | None = None) -> str:
+    """读取文件内容。offset 起始行，limit 最大行数。"""
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {path}")
     if not file_path.is_file():
         raise ValueError(f"Not a file: {path}")
-    return file_path.read_text(encoding="utf-8")
+    lines = file_path.read_text(encoding="utf-8").split("\n")
+    total = len(lines)
+    if offset:
+        lines = lines[offset:]
+    if limit:
+        lines = lines[:limit]
+    result = "\n".join(lines)
+    if offset or limit:
+        result = f"[Lines {offset}-{offset + len(lines)} of {total}]\n{result}"
+    return result
 
 @tool(name="write", description="Write content to a file. Creates or overwrites the file.")
 async def write(path: str, content: str) -> str:

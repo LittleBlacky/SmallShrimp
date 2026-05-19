@@ -41,6 +41,15 @@ def test_fill_ratio():
     assert guard._fill_ratio(100000) == 0.5
 
 
+def test_budget_truncate_read_hint():
+    guard = ContextGuard(context_window=100000)
+    msg = ToolMessage(content="A" * 12000, tool_call_id="c1", name="read")
+    result = guard._budget_truncate([msg])
+    assert "File truncated" in result[0].content
+    assert "offset" in result[0].content.lower()
+    assert "limit" in result[0].content.lower()
+
+
 def test_budget_truncate_head_tail():
     guard = ContextGuard(context_window=100000)
     head = "HEAD_" + "A" * 4995
@@ -58,5 +67,6 @@ if __name__ == "__main__":
     test_snip_duplicates_preserves_unique_reads()
     test_microcompact_keeps_recent()
     test_fill_ratio()
+    test_budget_truncate_read_hint()
     test_budget_truncate_head_tail()
     print("All multi-stage compaction tests passed!")

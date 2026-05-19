@@ -80,14 +80,25 @@ class ContextGuard:
         truncated = []
         for msg in messages:
             if isinstance(msg, ToolMessage) and len(msg.content) > limit:
-                half = limit // 2
-                head = msg.content[:half]
-                tail = msg.content[-half:]
-                truncated.append(ToolMessage(
-                    content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
-                    tool_call_id=msg.tool_call_id,
-                    name=msg.name,
-                ))
+                if msg.name == "read":
+                    truncated.append(ToolMessage(
+                        content=(
+                            f"{msg.content[:limit // 2]}\n\n"
+                            f"[File truncated: {len(msg.content)} chars total. "
+                            f"Use read(path, offset=N, limit=N) to read specific sections.]"
+                        ),
+                        tool_call_id=msg.tool_call_id,
+                        name=msg.name,
+                    ))
+                else:
+                    half = limit // 2
+                    head = msg.content[:half]
+                    tail = msg.content[-half:]
+                    truncated.append(ToolMessage(
+                        content=f"{head}\n\n...[{len(msg.content)} chars, showing first and last {half}]\n\n{tail}",
+                        tool_call_id=msg.tool_call_id,
+                        name=msg.name,
+                    ))
             else:
                 truncated.append(msg)
         return truncated
