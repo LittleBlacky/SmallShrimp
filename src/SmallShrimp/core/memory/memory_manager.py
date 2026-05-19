@@ -1,0 +1,249 @@
+from __future__ import annotations
+"""Memory Manager - Manages persistent memories across sessions."""
+import json
+import re
+from pathlib import Path
+from datetime import datetime, date
+from typing import TypedDict
+
+from ..message import HumanMessage, AssistantMessage, Message
+
+
+class MemoryRecord(TypedDict):
+    """记忆记录结构。"""
+    id: str
+    content: str
+    tags: list[str]
+    created_at: str
+    updated_at: str
+
+
+class TopicMemory:
+    """主题记忆 - 长期存储的事实和偏好。"""
+
+    def __init__(self, memory_dir: Path):
+        self.file_path = memory_dir / "topics" / "topics.jsonl"
+        self.memory_dir = memory_dir / "topics"
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+
+    def _load_all(self) -> list[MemoryRecord]:
+        if not self.file_path.exists():
+            return []
+        records = []
+        with open(self.file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+        return records
+
+    def _save_all(self, records: list[MemoryRecord]) -> None:
+        with open(self.file_path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def store(self, content: str, tags: list[str] | None = None) -> MemoryRecord:
+        """存储记忆。"""
+        record: MemoryRecord = {
+            "id": datetime.now().strftime("%Y%m%d%H%M%S"),
+            "content": content,
+            "tags": tags or [],
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        records = self._load_all()
+        records.append(record)
+        self._save_all(records)
+        return record
+
+    def search(self, query: str, tags: list[str] | None = None, limit: int = 10) -> list[MemoryRecord]:
+        """搜索记忆。"""
+        records = self._load_all()
+        results = []
+        query_lower = query.lower()
+        for record in records:
+            # 标签过滤
+            if tags:
+                if not any(t in record.get("tags", []) for t in tags):
+                    continue
+            # 关键词匹配
+            if query_lower:
+                if query_lower in record["content"].lower():
+                    results.append(record)
+            else:
+                results.append(record)
+        # 按时间倒序
+        results.sort(key=lambda r: r["created_at"], reverse=True)
+        return results[:limit]
+
+    def update(self, record_id: str, content: str | None = None, tags: list[str] | None = None) -> MemoryRecord | None:
+        """更新记忆。"""
+        records = self._load_all()
+        for record in records:
+            if record["id"] == record_id:
+                if content is not None:
+                    record["content"] = content
+                if tags is not None:
+                    record["tags"] = tags
+                record["updated_at"] = datetime.now().isoformat()
+                self._save_all(records)
+                return record
+        return None
+
+    def delete(self, record_id: str) -> bool:
+        """删除记忆。"""
+        records = self._load_all()
+        original_len = len(records)
+        records = [r for r in records if r["id"] != record_id]
+        if len(records) < original_len:
+            self._save_all(records)
+            return True
+        return False
+
+    def list_all(self) -> list[MemoryRecord]:
+        """列出所有记忆。"""
+        return self._load_all()
+
+
+class ProjectMemory:
+    """项目记忆 - 按项目存储上下文。"""
+
+    def __init__(self, memory_dir: Path):
+        self.memory_dir = memory_dir / "projects"
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+
+    def _project_file(self, project_id: str) -> Path:
+        """获取项目文件路径。"""
+        safe_id = re.sub(r'[^\w\-.]', '_', project_id)
+        return self.memory_dir / f"{safe_id}.json"
+
+    def save_project(self, project_id: str, data: dict) -> None:
+        """保存项目数据。"""
+        file_path = self._project_file(project_id)
+        data["updated_at"] = datetime.now().isoformat()
+        file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def load_project(self, project_id: str) -> dict | None:
+        """加载项目数据。"""
+        file_path = self._project_file(project_id)
+        if not file_path.exists():
+            return None
+        try:
+            return json.loads(file_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def list_projects(self) -> list[dict]:
+        """列出所有项目。"""
+        projects = []
+        for f in self.memory_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                projects.append({
+                    "id": data.get("id", f.stem),
+                    "name": data.get("name", f.stem),
+                    "updated_at": data.get("updated_at", ""),
+                })
+            except Exception:
+                projects.append({"id": f.stem, "name": f.stem, "updated_at": ""})
+        return sorted(projects, key=lambda p: p["updated_at"], reverse=True)
+
+    def delete_project(self, project_id: str) -> bool:
+        """删除项目。"""
+        file_path = self._project_file(project_id)
+        if file_path.exists():
+            file_path.unlink()
+            return True
+        return False
+
+
+class DailyNotes:
+    """日常笔记 - 按日期记录。"""
+
+    def __init__(self, memory_dir: Path):
+        self.daily_dir = memory_dir / "daily-notes"
+        self.daily_dir.mkdir(parents=True, exist_ok=True)
+
+    def _note_file(self, note_date: date | None = None) -> Path:
+        if note_date is None:
+            note_date = date.today()
+        return self.daily_dir / f"{note_date.strftime('%Y-%m-%d')}.md"
+
+    def write_note(self, content: str, note_date: date | None = None) -> None:
+        """写入笔记（追加模式）。"""
+        file_path = self._note_file(note_date)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(f"\n## [{timestamp}]\n\n{content}\n")
+
+    def read_note(self, note_date: date | None = None) -> str:
+        """读取笔记。"""
+        file_path = self._note_file(note_date)
+        if not file_path.exists():
+            return ""
+        return file_path.read_text(encoding="utf-8")
+
+    def list_notes(self, limit: int = 30) -> list[dict]:
+        """列出最近的笔记。"""
+        notes = []
+        for f in sorted(self.daily_dir.glob("*.md"), reverse=True)[:limit]:
+            notes.append({
+                "date": f.stem,
+                "size": f.stat().st_size,
+            })
+        return notes
+
+
+class MemoryManager:
+    """统一记忆管理器，整合 Topic、Project、DailyNotes。"""
+
+    def __init__(self, memory_dir: Path | None = None):
+        if memory_dir is None:
+            memory_dir = Path("workspace/memories")
+        self.memory_dir = Path(memory_dir)
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+
+        self.topics = TopicMemory(self.memory_dir)
+        self.projects = ProjectMemory(self.memory_dir)
+        self.daily = DailyNotes(self.memory_dir)
+
+    def recall(self, query: str, limit: int = 5) -> list[MemoryRecord]:
+        """从记忆库中检索相关内容。"""
+        return self.topics.search(query, limit=limit)
+
+    def remember(self, content: str, tags: list[str] | None = None) -> MemoryRecord:
+        """存储新记忆。"""
+        return self.topics.store(content, tags)
+
+    def project_update(self, project_id: str, key: str, value: any) -> None:
+        """更新项目上下文。"""
+        project = self.projects.load_project(project_id) or {"id": project_id, "name": project_id}
+        project[key] = value
+        self.projects.save_project(project_id, project)
+
+    def today_note(self, content: str) -> None:
+        """写入今日笔记。"""
+        self.daily.write_note(content)
+
+    def inject_memories(self, messages: list[Message], query: str | None = None, max_records: int = 5) -> list[Message]:
+        """将相关记忆注入消息列表前端。"""
+        if query:
+            records = self.recall(query, limit=max_records)
+        else:
+            records = self.topics.list_all()[:max_records]
+
+        if not records:
+            return messages
+
+        memory_lines = ["## 相关记忆\n"]
+        for r in records:
+            tags_str = f"[{'/'.join(r['tags'])}]" if r.get("tags") else ""
+            memory_lines.append(f"- {r['content']} {tags_str}")
+        memory_content = "\n".join(memory_lines)
+
+        # 插入到 system message 之后
+        from ..message import SystemMessage
+        memory_msg = SystemMessage(content=memory_content)
+        result = [messages[0], memory_msg] if messages else [memory_msg]
+        result.extend(messages[1:] if len(messages) > 1 else [])
+        return result
