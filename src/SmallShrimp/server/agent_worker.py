@@ -20,12 +20,39 @@ MAX_RETRIES = 3
 
 
 class AgentWorker(SubscriberWorker):
-    """将事件分发给会话执行器的 Worker。"""
+    """将事件分发给会话执行器的 Worker，带并发控制。"""
+
+    CLEANUP_THRESHOLD = 5
 
     def __init__(self, context: "Context") -> None:
         super().__init__(context)
+        self._semaphores: dict[str, asyncio.Semaphore] = {}
+        self._semaphore_limits: dict[str, int] = {}  # 记录每个 Agent 的 max_concurrency
+        self._cleanup_counter = 0
         self.context.eventbus.subscribe(InboundEvent, self.dispatch_event)
         self.logger.info("AgentWorker 已订阅 InboundEvent 事件")
+
+    def _get_or_create_semaphore(self, agent_def) -> asyncio.Semaphore:
+        """获取或创建指定 Agent 的信号量。"""
+        agent_id = agent_def.id or agent_def.name
+        if agent_id not in self._semaphores:
+            self._semaphores[agent_id] = asyncio.Semaphore(agent_def.max_concurrency)
+            self._semaphore_limits[agent_id] = agent_def.max_concurrency
+        return self._semaphores[agent_id]
+
+    def _maybe_cleanup_semaphores(self) -> None:
+        """定期清理完全空闲的信号量。"""
+        self._cleanup_counter += 1
+        if self._cleanup_counter < self.CLEANUP_THRESHOLD:
+            return
+        self._cleanup_counter = 0
+        stale = [
+            aid for aid, sem in self._semaphores.items()
+            if not sem._waiters and sem._value == self._semaphore_limits.get(aid, 1)
+        ]
+        for aid in stale:
+            del self._semaphores[aid]
+            del self._semaphore_limits[aid]
 
     async def dispatch_event(self, event: InboundEvent) -> None:
         """为类型事件创建执行器任务。"""
@@ -50,64 +77,68 @@ class AgentWorker(SubscriberWorker):
         asyncio.create_task(self.exec_session(event, agent_def))
 
     async def exec_session(self, event: InboundEvent, agent_def) -> None:
-        """使用给定 Agent 执行会话。"""
+        """使用给定 Agent 执行会话（受并发控制）。"""
+        sem = self._get_or_create_semaphore(agent_def)
         session_id = event.session_id
 
-        try:
-            # 使用依赖创建 Agent
-            agent = Agent(
-                agent_def,
-                self.context.config,
-                self.context.tool_registry,
-                self.context.history_manager,
-                prompt_builder=self.context.prompt_builder,
-            )
-
-            # 恢复或创建会话
-            if session_id:
-                try:
-                    session = agent.resume_session(session_id)
-                except ValueError:
-                    logger.warning(f"会话 {session_id} 不存在，创建新会话")
-                    session = agent.new_session(session_id=session_id)
-            else:
-                session = agent.new_session()
-                session_id = session.session_id
-
-            # 优先检查斜杠命令
-            if event.content.startswith("/"):
-                from ..core.commands.handlers import CommandContext
-                cmd_context = CommandContext(session, routing_table=self.context.routing_table)
-                result = await self.context.command_registry.dispatch(
-                    event.content, cmd_context
+        async with sem:
+            try:
+                # 使用依赖创建 Agent
+                agent = Agent(
+                    agent_def,
+                    self.context.config,
+                    self.context.tool_registry,
+                    self.context.history_manager,
+                    prompt_builder=self.context.prompt_builder,
                 )
-                if result:
-                    await self._emit_response(event, result)
-                    logger.info(f"命令执行完成: {session_id}")
-                    return
 
-            # 普通聊天
-            response = await session.chat(event.content)
-            logger.info(f"会话执行完成: {session_id}")
+                # 恢复或创建会话
+                if session_id:
+                    try:
+                        session = agent.resume_session(session_id)
+                    except ValueError:
+                        logger.warning(f"会话 {session_id} 不存在，创建新会话")
+                        session = agent.new_session(session_id=session_id)
+                else:
+                    session = agent.new_session()
+                    session_id = session.session_id
 
-            await self.context.eventbus.publish(
-                OutboundEvent(session_id=session_id, source=event.source, content=response)
-            )
+                # 优先检查斜杠命令
+                if event.content.startswith("/"):
+                    from ..core.commands.handlers import CommandContext
+                    cmd_context = CommandContext(session, routing_table=self.context.routing_table)
+                    result = await self.context.command_registry.dispatch(
+                        event.content, cmd_context
+                    )
+                    if result:
+                        await self._emit_response(event, result)
+                        logger.info(f"命令执行完成: {session_id}")
+                        return
 
-        except Exception as e:
-            logger.error(f"会话执行失败: {e}")
+                # 普通聊天
+                response = await session.chat(event.content)
+                logger.info(f"会话执行完成: {session_id}")
 
-            if event.retry_count < MAX_RETRIES:
-                # 指数退避重试
-                retry_event = replace(
-                    event,
-                    retry_count=event.retry_count + 1,
-                    content=".",  # 重试时发送最小消息
+                await self.context.eventbus.publish(
+                    OutboundEvent(session_id=session_id, source=event.source, content=response)
                 )
-                await asyncio.sleep(0.5 * (2 ** event.retry_count))  # 0.5s, 1s, 2s
-                await self.context.eventbus.publish(retry_event)
-            else:
-                await self._emit_response(event, "", str(e))
+
+            except Exception as e:
+                logger.error(f"会话执行失败: {e}")
+
+                if event.retry_count < MAX_RETRIES:
+                    # 指数退避重试
+                    retry_event = replace(
+                        event,
+                        retry_count=event.retry_count + 1,
+                        content=".",  # 重试时发送最小消息
+                    )
+                    await asyncio.sleep(0.5 * (2 ** event.retry_count))  # 0.5s, 1s, 2s
+                    await self.context.eventbus.publish(retry_event)
+                else:
+                    await self._emit_response(event, "", str(e))
+
+        self._maybe_cleanup_semaphores()
 
     async def _emit_response(
         self, event: InboundEvent, content: str, error: str | None = None
