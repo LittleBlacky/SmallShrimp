@@ -87,6 +87,7 @@ class LLMProvider:
         return {
             "content": message.content or "",
             "tool_calls": tool_calls,
+            "finish_reason": choice.finish_reason or "stop",
             "reasoning_content": reasoning,
             "should_store_reasoning": self.thinking_strategy.should_store_response(response),
         }

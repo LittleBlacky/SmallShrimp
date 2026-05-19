@@ -95,8 +95,9 @@ class AgentSession:
             # 解析 LLM 返回
             reasoning = response.get("reasoning_content")
             should_store = response.get("should_store_reasoning", False)
+            finish_reason = response.get("finish_reason", "stop")
 
-            if response["tool_calls"]:
+            if finish_reason == "tool_calls" and response["tool_calls"]:
 
                 # 保存 assistant 消息
                 assistant_with_tools = AssistantMessage(content="")
@@ -111,7 +112,6 @@ class AgentSession:
 
                 for tool_call in response["tool_calls"]:
                     tool_name = tool_call["function"]["name"]
-                    tool_args_str = tool_call["function"]["arguments"]
                     tool_args = json.loads(tool_call["function"]["arguments"]) if isinstance(tool_call["function"]["arguments"], str) else tool_call["function"]["arguments"]
 
                     # 执行工具
@@ -130,7 +130,12 @@ class AgentSession:
                 # 继续循环
                 continue
 
-            # 普通回复，结束循环
+            # 非 tool_calls 的停止原因（stop / length / content_filter）
+            if finish_reason == "length":
+                response["content"] = (response.get("content") or "") + (
+                    "\n\n[响应因达到最大 token 限制而被截断]"
+                )
+
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
 
