@@ -70,3 +70,32 @@ class HistoryManager:
         file_path = self.sessions_dir / f"{session_id}.json"
         if file_path.exists():
             file_path.unlink()
+
+    def append(self, session_id: str, message: dict) -> None:
+        """追加单条消息到会话。"""
+        file_path = self.sessions_dir / f"{session_id}.json"
+        if not file_path.exists():
+            # 创建新会话文件
+            data = {
+                "session_id": session_id,
+                "messages": [message],
+                "updated_at": datetime.now().isoformat(),
+            }
+            file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            # 追加到现有会话
+            data = json.loads(file_path.read_text())
+            data["messages"].append(message)
+            data["updated_at"] = datetime.now().isoformat()
+            file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+    def create_session(self, session_id: str, source: str) -> None:
+        """创建新会话（如果不存在）。"""
+        file_path = self.sessions_dir / f"{session_id}.json"
+        if not file_path.exists():
+            data = {
+                "session_id": session_id,
+                "messages": [],
+                "updated_at": datetime.now().isoformat(),
+            }
+            file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
