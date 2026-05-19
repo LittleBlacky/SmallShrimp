@@ -44,17 +44,19 @@ def test_fill_ratio():
 
 
 def test_offload_glob_writes_file():
-    """glob 大结果落盘，消息中保留摘要 + read 路径。"""
+    """glob 大结果落盘，展示首段 + offset 提示。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         guard = ContextGuard(context_window=500, offload_dir=tmpdir)
         files = "\n".join(f"src/module_{i}/very_long_file_name_for_testing.py" for i in range(250))
-        # 确保超过 OFFLOAD_SIZE_THRESHOLD
         assert len(files) > OFFLOAD_SIZE_THRESHOLD
         msg = ToolMessage(content=files, tool_call_id="c1", name="glob")
         result = guard._offload_large_results([msg])
         content = result[0].content
-        assert "[Offloaded:" in content
-        assert "Use read(path=" in content
+        assert "To continue: read(path=" in content
+        assert "[Lines 0-" in content
+        assert "Full result persisted to" in content
+        # 内联首段是原内容的前缀
+        assert content.startswith(files[:5000])
         # 确认落盘文件存在且内容完整
         offloaded_files = os.listdir(tmpdir)
         assert len(offloaded_files) == 1
@@ -63,7 +65,7 @@ def test_offload_glob_writes_file():
 
 
 def test_offload_grep_writes_file():
-    """grep 大结果落盘。"""
+    """grep 大结果落盘，展示首段 + offset 提示。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         guard = ContextGuard(context_window=500, offload_dir=tmpdir)
         padding = "x" * 80
@@ -72,16 +74,15 @@ def test_offload_grep_writes_file():
         msg = ToolMessage(content=matches, tool_call_id="c1", name="grep")
         result = guard._offload_large_results([msg])
         content = result[0].content
-        assert "[Offloaded:" in content
-        assert "Use read(path=" in content
-        assert "more matches" in content
-        # 落盘文件完整
+        assert "To continue: read(path=" in content
+        assert "[Lines 0-" in content
+        assert content.startswith(matches[:5000])
         offloaded_files = os.listdir(tmpdir)
         assert len(offloaded_files) == 1
 
 
 def test_offload_websearch_writes_file():
-    """websearch 大结果落盘。"""
+    """websearch 大结果落盘，展示首段 + offset 提示。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         guard = ContextGuard(context_window=500, offload_dir=tmpdir)
         entries = [f"{i}. **Title {i} {'x' * 200}**\n   http://example.com/{i}\n   {'Snippet ' * 50}" for i in range(30)]
@@ -89,12 +90,12 @@ def test_offload_websearch_writes_file():
         assert len(content) > OFFLOAD_SIZE_THRESHOLD
         msg = ToolMessage(content=content, tool_call_id="c1", name="websearch")
         result = guard._offload_large_results([msg])
-        assert "[Offloaded:" in result[0].content
-        assert "Use read(path=" in result[0].content
+        assert "To continue: read(path=" in result[0].content
+        assert result[0].content.startswith(content[:5000])
 
 
 def test_offload_read_writes_file():
-    """read 大结果落盘。"""
+    """read 大结果落盘，展示首段 + offset 提示。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         guard = ContextGuard(context_window=500, offload_dir=tmpdir)
         padding = "x" * 100
@@ -103,8 +104,9 @@ def test_offload_read_writes_file():
         assert len(content) > OFFLOAD_SIZE_THRESHOLD
         msg = ToolMessage(content=content, tool_call_id="c1", name="read")
         result = guard._offload_large_results([msg])
-        assert "[Offloaded:" in result[0].content
-        assert "Use read(path=" in result[0].content
+        assert "To continue: read(path=" in result[0].content
+        assert "offset=" in result[0].content
+        assert result[0].content.startswith(content[:5000])
 
 
 def test_offload_small_untouched():

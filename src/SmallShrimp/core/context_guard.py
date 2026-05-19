@@ -3,11 +3,13 @@ from __future__ import annotations
 
 """Context guard for proactive context window management.
 
-4-tier compaction (zero-cost first):
-  Tier 1 (Offload):    Persist large tool results to disk, keep summary+path in message
-  Tier 2 (Snip):       Replace stale/duplicate reads with placeholders
-  Tier 3 (Microcompact): Drop old tool results after inactivity
-  Tier 4 (Autocompact): LLM summary (API call)
+3-tier compaction (zero-cost first):
+  Tier 1 (Snip):       Replace stale/duplicate reads with placeholders
+  Tier 2 (Microcompact): Drop old tool results after inactivity
+  Tier 3 (Autocompact): LLM summary (API call)
+
++ Progressive read: large tool results are persisted and shown as
+  initial chunk + offset hints, LLM calls read(offset=N) to continue.
 """
 
 from dataclasses import dataclass, field
@@ -23,8 +25,8 @@ if TYPE_CHECKING:
 
 from .message import Message, ToolMessage, HumanMessage
 
-OFFLOAD_SIZE_THRESHOLD = 10000  # chars: results larger than this get offloaded to disk
-OFFLOAD_HEAD_CHARS = 3000       # chars to keep as inline summary
+OFFLOAD_SIZE_THRESHOLD = 8000   # chars: results larger than this get persisted
+OFFLOAD_INLINE_CHARS = 5000     # chars to show inline in ToolMessage before hint
 MICROCOMPACT_IDLE_SECONDS = 60
 
 COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
@@ -71,13 +73,11 @@ class ContextGuard:
                 "".join(m.get("content", "") or "" for m in messages)
             )
 
-    # ── Offload ─────────────────────────────────────────────
+    # ── Offload (progressive read) ──────────────────────────
     def _offload_large_results(self, messages: list["Message"]) -> list["Message"]:
-        """大工具结果落盘，消息中只保留摘要 + read() 路径（可恢复）。"""
+        """大结果落盘 + 展示首段，LLM 用 read(offset=N) 渐进读取。"""
         tokens = self.estimate_tokens_raw(messages)
         ratio = self._fill_ratio(tokens)
-
-        # 根据上下文压力设置阈值
         if ratio < 0.5:
             threshold = OFFLOAD_SIZE_THRESHOLD * 3
         elif ratio < 0.7:
@@ -94,7 +94,7 @@ class ContextGuard:
         return result
 
     def _offload_one(self, msg: ToolMessage) -> ToolMessage:
-        """保存完整结果到磁盘，返回摘要消息。"""
+        """落盘完整结果，返回：内联首段 + offset 提示。"""
         content = msg.content or ""
         tool_name = msg.name or "unknown"
         tool_id = msg.tool_call_id or uuid.uuid4().hex[:8]
@@ -106,90 +106,18 @@ class ContextGuard:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
-        # 按工具类型生成摘要
-        summary = self._summarize(msg, max_chars=OFFLOAD_HEAD_CHARS)
+        inline = content[:OFFLOAD_INLINE_CHARS]
+        shown_lines = inline.count("\n") + 1
+        total_lines = content.count("\n") + 1
+        total_chars = len(content)
+
         hint = (
-            f"[Offloaded: {len(content)} chars → {filepath}]\n"
-            f"Use read(path=\"{filepath}\") to view full result.\n\n"
-            f"{summary}"
+            f"{inline}\n"
+            f"\n[Lines 0-{shown_lines - 1} of {total_lines}, {total_chars} chars total]\n"
+            f"Full result persisted to {filepath}.\n"
+            f"To continue: read(path=\"{filepath}\", offset={shown_lines})"
         )
         return ToolMessage(content=hint, tool_call_id=msg.tool_call_id, name=msg.name)
-
-    # ── summarize helpers ────────────────────────────────
-
-    @staticmethod
-    def _summarize(msg: ToolMessage, max_chars: int) -> str:
-        """按工具类型生成摘要。"""
-        name = msg.name or ""
-        content = msg.content or ""
-
-        if name in ("read", "webread"):
-            return ContextGuard._summarize_readlike(content, max_chars)
-        elif name == "glob":
-            return ContextGuard._summarize_glob(content, max_chars)
-        elif name == "grep":
-            return ContextGuard._summarize_grep(content, max_chars)
-        elif name == "websearch":
-            return ContextGuard._summarize_websearch(content, max_chars)
-        else:
-            return content[:max_chars] + ("..." if len(content) > max_chars else "")
-
-    @staticmethod
-    def _summarize_readlike(content: str, max_chars: int) -> str:
-        """read/webread: 保留行范围信息 + 开头摘要。"""
-        lines_header = ""
-        body = content
-        if content.startswith("[Lines ") or content.startswith("[Line "):
-            end = content.find("]\n")
-            if end != -1:
-                lines_header = content[:end + 1] + "\n"
-                body = content[end + 2:]
-
-        # 取开头 + 结尾各一半
-        half = max_chars // 2
-        head = body[:half]
-        tail = body[-half:] if len(body) > half else ""
-        sep = "\n...\n" if tail else ""
-        return lines_header + head + sep + tail
-
-    @staticmethod
-    def _summarize_glob(content: str, max_chars: int) -> str:
-        """glob: 列出文件数量 + 前几个。"""
-        lines = content.strip().split("\n")
-        total = len(lines)
-        kept = []
-        for line in lines:
-            if len("\n".join(kept + [line])) > max_chars:
-                kept.append(f"... and {total - len(kept)} more files")
-                break
-            kept.append(line)
-        return "\n".join(kept)
-
-    @staticmethod
-    def _summarize_grep(content: str, max_chars: int) -> str:
-        """grep: 匹配数量 + 前几条。"""
-        lines = content.strip().split("\n")
-        total = len(lines)
-        kept = []
-        for line in lines:
-            if len("\n".join(kept + [line])) > max_chars:
-                kept.append(f"... and {total - len(kept)} more matches")
-                break
-            kept.append(line)
-        return "\n".join(kept)
-
-    @staticmethod
-    def _summarize_websearch(content: str, max_chars: int) -> str:
-        """websearch: 结果数量 + 前几条。"""
-        entries = content.split("\n\n")
-        total = len(entries)
-        kept = []
-        for entry in entries:
-            if len("\n\n".join(kept + [entry])) > max_chars:
-                kept.append(f"... and {total - len(kept)} more results")
-                break
-            kept.append(entry)
-        return "\n\n".join(kept)
 
     def estimate_tokens_raw(self, messages: list["Message"]) -> int:
         """估算原始消息列表的 token（不通过 state）。"""

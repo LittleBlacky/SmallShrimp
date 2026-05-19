@@ -41,10 +41,9 @@ def test_offload_large_results():
 
         assert len(offloaded) == 2
         assert offloaded[0].content == "Hello"
-        assert "[Offloaded:" in offloaded[1].content
-        assert "Use read(path=" in offloaded[1].content
-        # 确认文件落盘
-        assert len(os.listdir(tmpdir)) == 1
+        assert "To continue: read(path=" in offloaded[1].content
+        assert "offset=" in offloaded[1].content
+        assert offloaded[1].content.startswith(large_content[:5000])
 
 
 def test_offload_preserves_small_results():
