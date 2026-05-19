@@ -24,22 +24,21 @@ class Agent:
         history_manager: "HistoryManager",
         prompt_builder: "PromptBuilder | None" = None,
         context_guard: "ContextGuard | None" = None,
-        context: "Context | None" = None,
     ) -> None:
         self.agent_def = agent_def
         self.config = config
         self.llm: "LLMProvider" = self._create_llm()
-        self.tool_registry = tool_registry
         self.history_manager = history_manager
         self.prompt_builder = prompt_builder
-        self.context = context
-        # 注册 subagent_dispatch 工具（如果有 context 且有可调度的 Agent）
-        if context and context.agent_loader:
-            from ..tools.subagent_tool import create_subagent_dispatch_tool
-            agent_id = agent_def.id or agent_def.name
-            subagent_tool = create_subagent_dispatch_tool(agent_id, context)
-            if subagent_tool:
-                tool_registry.register(subagent_tool)
+        if agent_def.tools:
+            from ..tools.registry import ToolRegistry
+            self.tool_registry = ToolRegistry()
+            for name in agent_def.tools:
+                t = tool_registry.get(name)
+                if t:
+                    self.tool_registry.register(t)
+        else:
+            self.tool_registry = tool_registry
         # 从 agent_def 获取 context_window 的 80% 作为压缩阈值
         context_window = agent_def.llm.get("context_window", 200000)
         token_threshold = int(context_window * 0.8)

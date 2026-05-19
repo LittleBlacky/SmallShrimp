@@ -12,6 +12,7 @@ class AgentDef:
     name: str = ""
     description: str = ""
     llm: dict[str, Any] = field(default_factory=dict)
+    tools: list[str] = field(default_factory=list)  # 空=共享全部
     capabilities: list[str] = field(default_factory=list)
     guidelines: list[str] = field(default_factory=list)
     instructions: list[str] = field(default_factory=list)
@@ -55,6 +56,7 @@ class AgentDef:
             name=frontmatter.get("name", ""),
             description=frontmatter.get("description", ""),
             llm=frontmatter.get("llm", {}),
+            tools=frontmatter.get("tools", []),
             capabilities=frontmatter.get("capabilities", []),
             guidelines=guidelines,
             instructions=instructions,

@@ -7,6 +7,7 @@ llm:
   temperature: 0.7
   context_window: 1000000
   max_tokens: 393216
+# tools 不声明 = 使用全部可用工具
 ---
 
 # About Pickle
