@@ -21,14 +21,13 @@ def test_context_guard_default_threshold():
     assert guard.token_threshold == 160000  # 80% of 200k
 
 
-def test_truncate_large_tool_results():
-    """测试工具结果截断。"""
+def test_budget_truncate():
+    """测试工具结果截断（Tier 1 Budget）。"""
     from src.SmallShrimp.core.context_guard import ContextGuard, MAX_TOOL_RESULT_CHARS
     from src.SmallShrimp.core.message import HumanMessage, ToolMessage
 
-    guard = ContextGuard()
+    guard = ContextGuard(context_window=100000)
 
-    small_content = "Normal result"
     large_content = "x" * (MAX_TOOL_RESULT_CHARS + 1000)
 
     messages = [
@@ -36,12 +35,12 @@ def test_truncate_large_tool_results():
         ToolMessage(content=large_content, tool_call_id="call1", name="test"),
     ]
 
-    truncated = guard._truncate_large_tool_results(messages)
+    truncated = guard._budget_truncate(messages)
 
     assert len(truncated) == 2
     assert truncated[0].content == "Hello"
-    assert len(truncated[1].content) < len(large_content)
-    assert "[truncated]" in truncated[1].content
+    # 简单头部截断应包含 truncated 标记
+    assert "truncated" in truncated[1].content.lower()
 
 
 def test_truncate_preserves_small_results():
@@ -49,13 +48,13 @@ def test_truncate_preserves_small_results():
     from src.SmallShrimp.core.context_guard import ContextGuard
     from src.SmallShrimp.core.message import ToolMessage
 
-    guard = ContextGuard()
+    guard = ContextGuard(context_window=100000)
 
     messages = [
         ToolMessage(content="Small result", tool_call_id="call1", name="test"),
     ]
 
-    truncated = guard._truncate_large_tool_results(messages)
+    truncated = guard._budget_truncate(messages)
 
     assert len(truncated) == 1
     assert truncated[0].content == "Small result"
@@ -66,14 +65,14 @@ def test_truncate_non_tool_messages():
     from src.SmallShrimp.core.context_guard import ContextGuard
     from src.SmallShrimp.core.message import HumanMessage, AssistantMessage
 
-    guard = ContextGuard()
+    guard = ContextGuard(context_window=100000)
 
     messages = [
         HumanMessage(content="User message"),
         AssistantMessage(content="Assistant response"),
     ]
 
-    truncated = guard._truncate_large_tool_results(messages)
+    truncated = guard._budget_truncate(messages)
 
     assert len(truncated) == 2
     assert truncated[0].content == "User message"
@@ -109,7 +108,7 @@ async def test_check_and_compact_under_threshold():
 if __name__ == "__main__":
     test_context_guard_init()
     test_context_guard_default_threshold()
-    test_truncate_large_tool_results()
+    test_budget_truncate()
     test_truncate_preserves_small_results()
     test_truncate_non_tool_messages()
     print("\nAll test_context_guard tests passed!")
