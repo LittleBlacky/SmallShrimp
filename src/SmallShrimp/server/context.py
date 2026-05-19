@@ -95,4 +95,9 @@ class Context:
 
         # RoutingTable 需要 Context 引用
         context.routing_table = RoutingTable(context)
+
+        # 统一注册依赖 Context 的工具
+        from ..tools import register_context_tools
+        register_context_tools(context.tool_registry, context)
+
         return context

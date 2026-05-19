@@ -32,3 +32,24 @@ def create_tool_registry(config: dict) -> ToolRegistry:
     registry.register(create_cron_tool())
 
     return registry
+
+
+def register_context_tools(registry: ToolRegistry, context) -> None:
+    """注册依赖 Context 的工具（需 channels / eventbus / agent_loader）。
+    在 Context 创建完成后调用，所有 context 相关工具在此统一注册。
+    """
+    # post_message：有渠道时注册
+    if context.channels:
+        from .post_message_tool import create_post_message_tool
+        post_tool = create_post_message_tool(context)
+        if post_tool:
+            registry.register(post_tool)
+
+    # subagent_dispatch：有多个 Agent 时注册
+    agents = context.agent_loader.discover_agents()
+    if len(agents) > 1:
+        from .subagent_tool import create_subagent_dispatch_tool
+        agent_id = agents[0].id or agents[0].name
+        subagent_tool = create_subagent_dispatch_tool(agent_id, context)
+        if subagent_tool:
+            registry.register(subagent_tool)
