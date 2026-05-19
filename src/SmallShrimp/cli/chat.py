@@ -45,6 +45,7 @@ class ChatLoop:
             self.context.tool_registry,
             self.context.history_manager,
             prompt_builder=self.context.prompt_builder,
+            context=self.context,
         )
         self.session = self.agent.new_session(source=CliEventSource())
 

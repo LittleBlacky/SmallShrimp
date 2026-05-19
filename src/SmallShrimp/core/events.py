@@ -49,6 +49,22 @@ class EventSource(ABC):
 
 
 @dataclass
+class AgentEventSource(EventSource):
+    """Source for agent-dispatched events."""
+
+    _namespace = "agent"
+    agent_id: str = ""
+
+    def __str__(self) -> str:
+        return f"agent:{self.agent_id}"
+
+    @classmethod
+    def from_string(cls, s: str) -> "AgentEventSource":
+        _, agent_id = s.split(":", 1)
+        return cls(agent_id=agent_id)
+
+
+@dataclass
 class CliEventSource(EventSource):
     """Source for CLI-originated events."""
 
@@ -132,10 +148,25 @@ class OutboundEvent(Event):
     error: str | None = None
 
 
+@dataclass
+class DispatchEvent(Event):
+    """Event for subagent dispatch."""
+    parent_session_id: str = ""
+    retry_count: int = 0
+
+
+@dataclass
+class DispatchResultEvent(Event):
+    """Result from a dispatched subagent task."""
+    error: str | None = None
+
+
 # Registry mapping event class names to event classes
 _EVENT_CLASSES: dict[str, type[Event]] = {
     "InboundEvent": InboundEvent,
     "OutboundEvent": OutboundEvent,
+    "DispatchEvent": DispatchEvent,
+    "DispatchResultEvent": DispatchResultEvent,
 }
 
 

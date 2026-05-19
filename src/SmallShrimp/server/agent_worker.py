@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING
 
 from .worker import SubscriberWorker
 from ..core.agent import Agent
-from ..core.events import InboundEvent, OutboundEvent, CliEventSource
+from ..core.events import (
+    InboundEvent, OutboundEvent, CliEventSource,
+    AgentEventSource, DispatchEvent, DispatchResultEvent,
+)
 from ..core.commands.registry import CommandRegistry
+from typing import Union
 
 if TYPE_CHECKING:
     from .context import Context
@@ -30,7 +34,8 @@ class AgentWorker(SubscriberWorker):
         self._semaphore_limits: dict[str, int] = {}  # 记录每个 Agent 的 max_concurrency
         self._cleanup_counter = 0
         self.context.eventbus.subscribe(InboundEvent, self.dispatch_event)
-        self.logger.info("AgentWorker 已订阅 InboundEvent 事件")
+        self.context.eventbus.subscribe(DispatchEvent, self.dispatch_event)
+        self.logger.info("AgentWorker 已订阅 InboundEvent 和 DispatchEvent 事件")
 
     def _get_or_create_semaphore(self, agent_def) -> asyncio.Semaphore:
         """获取或创建指定 Agent 的信号量。"""
@@ -54,7 +59,7 @@ class AgentWorker(SubscriberWorker):
             del self._semaphores[aid]
             del self._semaphore_limits[aid]
 
-    async def dispatch_event(self, event: InboundEvent) -> None:
+    async def dispatch_event(self, event: ProcessableEvent) -> None:
         """为类型事件创建执行器任务。"""
         session_id = event.session_id
 
@@ -76,7 +81,7 @@ class AgentWorker(SubscriberWorker):
         # 创建任务执行会话
         asyncio.create_task(self.exec_session(event, agent_def))
 
-    async def exec_session(self, event: InboundEvent, agent_def) -> None:
+    async def exec_session(self, event: ProcessableEvent, agent_def: "AgentDef") -> None:
         """使用给定 Agent 执行会话（受并发控制）。"""
         sem = self._get_or_create_semaphore(agent_def)
         session_id = event.session_id
@@ -90,6 +95,7 @@ class AgentWorker(SubscriberWorker):
                     self.context.tool_registry,
                     self.context.history_manager,
                     prompt_builder=self.context.prompt_builder,
+                    context=self.context,
                 )
 
                 # 恢复或创建会话
@@ -119,9 +125,7 @@ class AgentWorker(SubscriberWorker):
                 response = await session.chat(event.content)
                 logger.info(f"会话执行完成: {session_id}")
 
-                await self.context.eventbus.publish(
-                    OutboundEvent(session_id=session_id, source=event.source, content=response)
-                )
+                await self._emit_response(event, response)
 
             except Exception as e:
                 logger.error(f"会话执行失败: {e}")
@@ -141,15 +145,22 @@ class AgentWorker(SubscriberWorker):
         self._maybe_cleanup_semaphores()
 
     async def _emit_response(
-        self, event: InboundEvent, content: str, error: str | None = None
+        self, event: ProcessableEvent, content: str, error: str | None = None
     ) -> None:
-        """发送带内容的响应事件。"""
-        source = event.source if hasattr(event, "source") and event.source else CliEventSource()
-        await self.context.eventbus.publish(
-            OutboundEvent(
+        """发送响应。DispatchEvent → DispatchResultEvent，否则 → OutboundEvent。"""
+        if isinstance(event, DispatchEvent):
+            result_event = DispatchResultEvent(
+                session_id=event.session_id,
+                source=event.source,
+                content=content,
+                error=error,
+            )
+        else:
+            source = event.source if hasattr(event, "source") and event.source else CliEventSource()
+            result_event = OutboundEvent(
                 session_id=event.session_id,
                 source=source,
                 content=content,
-                error=str(error) if error else None,
+                error=error,
             )
-        )
+        await self.context.eventbus.publish(result_event)
