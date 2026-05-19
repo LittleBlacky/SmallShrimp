@@ -141,22 +141,8 @@ class AgentSession:
                 # 由 thinking_strategy 决定是否保存 reasoning_content 到 pending
                 self.state.pending_reasoning_content = reasoning if should_store else None
 
-                for tool_call in response["tool_calls"]:
-                    tool_name = tool_call["function"]["name"]
-                    tool_args = json.loads(tool_call["function"]["arguments"]) if isinstance(tool_call["function"]["arguments"], str) else tool_call["function"]["arguments"]
-
-                    # 执行工具
-                    tool_result = await self.agent.tool_registry.execute_tool(
-                        tool_name, **tool_args
-                    )
-
-                    # 添加工具结果消息
-                    tool_msg = ToolMessage(
-                        content=tool_result,
-                        tool_call_id=tool_call["id"],
-                        name=tool_name
-                    )
-                    self.state.add_message(tool_msg)
+                # 并行执行只读工具，串行执行写工具
+                await self._execute_tool_calls(response["tool_calls"])
 
                 # 继续循环
                 continue
@@ -173,3 +159,43 @@ class AgentSession:
             if self.agent.history_manager:
                 self.agent.history_manager.save(self.session_id, self.state.messages)
             return response["content"] or ""
+
+    async def _execute_tool_calls(self, tool_calls: list) -> None:
+        """并行执行只读工具，串行执行写工具。"""
+        import asyncio
+
+        # 只读工具（可并行）
+        READONLY_TOOLS = {"read", "glob", "grep", "websearch", "webread", "skill"}
+        reads: list[tuple] = []
+        writes: list[tuple] = []
+
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+            entry = (tc, name, args)
+            if name in READONLY_TOOLS:
+                reads.append(entry)
+            else:
+                writes.append(entry)
+
+        # 并行执行只读工具
+        if reads:
+            async def _run_read(tc, name, args):
+                result = await self.agent.tool_registry.execute_tool(name, **args)
+                return (tc, result)
+            results = await asyncio.gather(*(_run_read(*r) for r in reads))
+            for tc, result in results:
+                self.state.add_message(ToolMessage(
+                    content=result,
+                    tool_call_id=tc["id"],
+                    name=tc["function"]["name"],
+                ))
+
+        # 串行执行写工具
+        for tc, name, args in writes:
+            result = await self.agent.tool_registry.execute_tool(name, **args)
+            self.state.add_message(ToolMessage(
+                content=result,
+                tool_call_id=tc["id"],
+                name=name,
+            ))
