@@ -27,4 +27,8 @@ def create_tool_registry(config: dict) -> ToolRegistry:
     registry.register(create_websearch_tool(config.get("websearch", {})))
     registry.register(create_webread_tool())
 
+    # Cron 工具
+    from .cron_tool import create_cron_tool
+    registry.register(create_cron_tool())
+
     return registry

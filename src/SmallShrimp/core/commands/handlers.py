@@ -165,6 +165,91 @@ async def cmd_notes(context: CommandContext, args: list[str]) -> str:
     return "\n".join(lines)
 
 
+# ── Cron 定时任务命令 ──
+
+@register_command(name="cron", description="管理定时任务", usage="/cron <add|list|delete> [args]")
+async def cmd_cron(context: CommandContext, args: list[str]) -> str:
+    """管理定时任务。"""
+    if not args:
+        return "用法:\n  /cron add <schedule> <name> [agent] [内容...]\n  /cron list\n  /cron delete <id>"
+
+    subcmd = args[0].lower()
+
+    if subcmd == "list":
+        return _cron_list(context)
+
+    if subcmd == "delete":
+        if len(args) < 2:
+            return "用法: /cron delete <id>"
+        return _cron_delete(context, args[1])
+
+    if subcmd == "add":
+        if len(args) < 3:
+            return "用法: /cron add <schedule> <name> [agent] [内容...]\n例如: /cron add \"0 9 * * *\" morning-report pickle 发送每日早报"
+        schedule = args[1]
+        name = args[2]
+        agent = args[3] if len(args) > 3 else "pickle"
+        prompt = " ".join(args[4:]) if len(args) > 4 else name
+        return _cron_add(context, schedule, name, agent, prompt)
+
+    return f"未知子命令: {subcmd}"
+
+
+def _cron_add(context: CommandContext, schedule: str, name: str, agent: str, prompt: str) -> str:
+    """创建定时任务。"""
+    from pathlib import Path
+    from ..cron_loader import CronLoader
+
+    crons_dir = Path("workspace/crons")
+    cron_id = name.lower().replace(" ", "-")
+
+    cron_dir = crons_dir / cron_id
+    cron_dir.mkdir(parents=True, exist_ok=True)
+
+    yaml_content = f"""---
+name: {name}
+schedule: "{schedule}"
+agent: {agent}
+---
+{prompt}
+"""
+    (cron_dir / "CRON.md").write_text(yaml_content, encoding="utf-8")
+
+    return f"✓ 已创建定时任务 `{cron_id}`:\n  名称: {name}\n  计划: {schedule}\n  Agent: {agent}"
+
+
+def _cron_list(context: CommandContext) -> str:
+    """列出所有定时任务。"""
+    from pathlib import Path
+    from ..cron_loader import CronLoader
+
+    crons_dir = Path("workspace/crons")
+    loader = CronLoader(crons_dir)
+    jobs = loader.discover_crons()
+
+    if not jobs:
+        return "暂无定时任务。使用 /cron add 创建。"
+
+    lines = ["定时任务列表:"]
+    for job in jobs:
+        one_off_mark = " [一次性]" if job.one_off else ""
+        lines.append(f"  • `{job.id}`{one_off_mark} - {job.schedule} → {job.agent}")
+    return "\n".join(lines)
+
+
+def _cron_delete(context: CommandContext, cron_id: str) -> str:
+    """删除定时任务。"""
+    import shutil
+    from pathlib import Path
+
+    cron_path = Path("workspace/crons") / cron_id
+    if not cron_path.exists():
+        return f"定时任务 `{cron_id}` 不存在。"
+
+    shutil.rmtree(cron_path)
+    return f"✓ 已删除定时任务 `{cron_id}`"
+
+
 # ── 路由管理命令 ──
 
 @register_command(name="route", description="添加路由规则", usage="/route <pattern> <agent>")

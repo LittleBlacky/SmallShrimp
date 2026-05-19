@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.SmallShrimp.core.cron_loader import CronDef, CronLoader, find_due_jobs
 from src.SmallShrimp.core.events import CronEventSource
@@ -104,6 +106,152 @@ def test_cron_event_source_from_string():
     """从字符串反序列化。"""
     source = CronEventSource.from_string("cron:morning-report")
     assert source.cron_id == "morning-report"
+
+
+# ── /cron 命令测试 ──
+
+def test_cron_add_command():
+    """测试 /cron add 创建定时任务。"""
+    import tempfile, os
+    from unittest.mock import MagicMock
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            workspace = Path("workspace")
+            (workspace / "crons").mkdir(parents=True)
+
+            context = MagicMock()
+            context.session = MagicMock()
+            context.session.agent = MagicMock()
+
+            from src.SmallShrimp.core.commands.handlers import _cron_add
+            result = _cron_add(context, "0 9 * * *", "Morning Report", "pickle", "发送早报")
+            assert "已创建" in result
+            assert (workspace / "crons" / "morning-report" / "CRON.md").exists()
+        finally:
+            os.chdir(cwd)
+
+
+def test_cron_list_command():
+    """测试 /cron list 列出任务。"""
+    import tempfile, os
+    from unittest.mock import MagicMock
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            workspace = Path("workspace")
+            crons_dir = workspace / "crons"
+            crons_dir.mkdir(parents=True)
+
+            job_dir = crons_dir / "test-job"
+            job_dir.mkdir()
+            (job_dir / "CRON.md").write_text("""---
+name: Test Job
+schedule: "0 * * * *"
+agent: pickle
+---
+Test prompt
+""")
+
+            context = MagicMock()
+            from src.SmallShrimp.core.commands.handlers import _cron_list
+            result = _cron_list(context)
+            assert "test-job" in result
+        finally:
+            os.chdir(cwd)
+
+
+def test_cron_delete_command():
+    """测试 /cron delete 删除任务。"""
+    import tempfile, os, shutil
+    from unittest.mock import MagicMock
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            workspace = Path("workspace")
+            crons_dir = workspace / "crons"
+            crons_dir.mkdir(parents=True)
+
+            job_dir = crons_dir / "to-delete"
+            job_dir.mkdir()
+            (job_dir / "CRON.md").write_text("test")
+
+            context = MagicMock()
+            from src.SmallShrimp.core.commands.handlers import _cron_delete
+            result = _cron_delete(context, "to-delete")
+            assert "已删除" in result
+            assert not job_dir.exists()
+        finally:
+            os.chdir(cwd)
+
+
+# ── cron_set 工具测试 ──
+
+def test_cron_set_tool_add():
+    """测试 cron_set 工具创建定时任务。"""
+    from src.SmallShrimp.tools.cron_tool import create_cron_tool
+
+    tool = create_cron_tool()
+    assert tool is not None
+    assert tool.name == "cron_set"
+
+
+@pytest.mark.asyncio
+async def test_cron_set_execute_add():
+    """执行 cron_set add。"""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            workspace = Path("workspace")
+            (workspace / "crons").mkdir(parents=True)
+
+            from src.SmallShrimp.tools.cron_tool import create_cron_tool
+            tool = create_cron_tool()
+            result = await tool.call(
+                action="add",
+                schedule="0 9 * * *",
+                name="Daily Report",
+                prompt="发送每日报告",
+            )
+            assert "已创建" in result.content
+            assert (workspace / "crons" / "daily-report" / "CRON.md").exists()
+        finally:
+            os.chdir(cwd)
+
+
+@pytest.mark.asyncio
+async def test_cron_set_execute_delete():
+    """执行 cron_set delete。"""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            workspace = Path("workspace")
+            crons_dir = workspace / "crons"
+            crons_dir.mkdir(parents=True)
+
+            job_dir = crons_dir / "old-job"
+            job_dir.mkdir()
+            (job_dir / "CRON.md").write_text("test")
+
+            from src.SmallShrimp.tools.cron_tool import create_cron_tool
+            tool = create_cron_tool()
+            result = await tool.call(action="delete", name="old-job")
+            assert "已删除" in result.content
+            assert not job_dir.exists()
+        finally:
+            os.chdir(cwd)
 
 
 if __name__ == "__main__":
