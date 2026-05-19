@@ -31,11 +31,31 @@ class DiscordConfig:
 
 
 @dataclass
+class WeComConfig:
+    """企业微信群机器人配置。"""
+    enabled: bool = False
+    webhook_url: str = ""
+
+
+@dataclass
+class WeComAppConfig:
+    """企业微信应用配置（双向）。"""
+    enabled: bool = False
+    corp_id: str = ""
+    agent_id: int = 0
+    secret: str = ""
+    token: str = ""
+    encoding_aes_key: str = ""
+
+
+@dataclass
 class ChannelConfig:
     """频道配置。"""
     enabled: bool = False
     telegram: TelegramConfig | None = None
     discord: DiscordConfig | None = None
+    wecom: WeComConfig | None = None
+    wecom_app: WeComAppConfig | None = None
 
 
 class Config:
@@ -166,6 +186,8 @@ class Config:
             enabled=channel_data.get("enabled", False),
             telegram=TelegramConfig(**channel_data.get("telegram", {})) if channel_data.get("telegram") else None,
             discord=DiscordConfig(**channel_data.get("discord", {})) if channel_data.get("discord") else None,
+            wecom=WeComConfig(**channel_data.get("wecom", {})) if channel_data.get("wecom") else None,
+            wecom_app=WeComAppConfig(**channel_data.get("wecom_app", {})) if channel_data.get("wecom_app") else None,
         )
 
     def _set_nested(self, obj: dict, key: str, value: Any) -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from .base import Channel
 from .telegram_channel import TelegramChannel, TelegramEventSource
 from .discord_channel import DiscordChannel, DiscordEventSource
+from .wecom_channel import WeComChannel, WeComEventSource
+from .wecom_app_channel import WeComAppChannel, WeComAppEventSource
 
 __all__ = [
     "Channel",
@@ -10,6 +12,10 @@ __all__ = [
     "TelegramEventSource",
     "DiscordChannel",
     "DiscordEventSource",
+    "WeComChannel",
+    "WeComEventSource",
+    "WeComAppChannel",
+    "WeComAppEventSource",
 ]
 
 
@@ -24,5 +30,12 @@ def create_channels_from_config(config) -> list[Channel]:
 
     if channel_config.discord and channel_config.discord.enabled:
         channels.append(DiscordChannel(channel_config.discord))
+
+    if channel_config.wecom and channel_config.wecom.enabled:
+        channels.append(WeComChannel(channel_config.wecom.webhook_url))
+
+    if channel_config.wecom_app and channel_config.wecom_app.enabled:
+        from .wecom_app_channel import WeComAppChannel
+        channels.append(WeComAppChannel(channel_config.wecom_app))
 
     return channels
