@@ -52,6 +52,59 @@ class ChatLoop:
             tool_registry,
             history_manager,
         )
+        self.session = self.agent.new_session(source=CliEventSource())
+
+        # 订阅 InboundEvent - 直接处理消息
+        self.eventbus.subscribe(InboundEvent, self.handle_inbound_event)
+
+    async def handle_inbound_event(self, event: InboundEvent) -> None:
+        """处理入站事件，调用 Agent 生成响应。"""
+        try:
+            # 处理斜杠命令
+            if event.content.startswith("/"):
+                from ..core.commands.registry import CommandRegistry
+                from ..core.commands.handlers import CommandContext
+
+                cmd_context = CommandContext(self.session)
+                result = await CommandRegistry.dispatch(event.content, cmd_context)
+                if result:
+                    await self.eventbus.publish(
+                        OutboundEvent(
+                            session_id=event.session_id,
+                            source=event.source,
+                            content=result,
+                        )
+                    )
+                else:
+                    await self.eventbus.publish(
+                        OutboundEvent(
+                            session_id=event.session_id,
+                            source=event.source,
+                            content="未知命令",
+                        )
+                    )
+            else:
+                # 普通聊天
+                response = await self.session.chat(event.content)
+                await self.eventbus.publish(
+                    OutboundEvent(
+                        session_id=event.session_id,
+                        source=event.source,
+                        content=response,
+                    )
+                )
+        except Exception as e:
+            logger.error(f"处理消息失败: {e}")
+            await self.eventbus.publish(
+                OutboundEvent(
+                    session_id=event.session_id,
+                    source=event.source,
+                    content="",
+                    error=str(e),
+                )
+            )
+        self.eventbus.ack(event)
+
     async def handle_outbound_event(self, event: OutboundEvent) -> None:
         """处理出站事件，将响应放入队列。"""
         await self.response_queue.put(event)
@@ -65,7 +118,7 @@ class ChatLoop:
 
     def display_agent_response(self, content: str) -> None:
         """显示 Agent 响应。"""
-        prefix = Text(f"{self.agent_def.id}: ", style="green")
+        prefix = Text(f"{self.agent_def.name}: ", style="green")
         self.console.print(prefix, end="")
         self.console.print(content)
 
@@ -83,15 +136,7 @@ class ChatLoop:
         # 启动 EventBus Worker
         self.eventbus.start()
 
-        # 创建 CLI 会话
-        agent = Agent(
-            self.agent_def,
-            self.config,
-            None,  # CLI 不需要 tool_registry
-            None,  # CLI 不需要 history_manager
-        )
-        session = agent.new_session(CliEventSource())
-        session_id = session.session_id
+        session_id = self.session.session_id
 
         try:
             while True:
@@ -116,6 +161,8 @@ class ChatLoop:
                     response = await asyncio.wait_for(
                         self.response_queue.get(), timeout=60.0
                     )
+                    if response.error:
+                        self.console.print(f"[red]错误: {response.error}[/red]")
                     self.display_agent_response(response.content)
                 except asyncio.TimeoutError:
                     self.console.print("[red]Agent response timed out[/red]")
