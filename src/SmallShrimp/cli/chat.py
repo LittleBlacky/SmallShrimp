@@ -1,6 +1,7 @@
 from __future__ import annotations
 """Chat CLI - 基于事件驱动架构的交互式会话。"""
 import asyncio
+import logging
 from pathlib import Path
 
 from rich.console import Console
@@ -12,7 +13,10 @@ from ..core.agent import Agent
 from ..core.events import OutboundEvent, InboundEvent, CliEventSource
 from ..core.eventbus import EventBus
 from ..core.agent_loader import AgentLoader
+from ..core.history import HistoryManager
 from ..utils.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class ChatLoop:
@@ -36,6 +40,18 @@ class ChatLoop:
         agent_id = agent_id or config.default_agent
         self.agent_def = self.agent_loader.load(agent_id)
 
+        # 创建完备的组件
+        history_manager = HistoryManager(Path("workspace/sessions"))
+        from ..tools import create_tool_registry
+        tool_registry = create_tool_registry(self.config.data)
+
+        # 创建 Agent 实例
+        self.agent = Agent(
+            self.agent_def,
+            self.config,
+            tool_registry,
+            history_manager,
+        )
     async def handle_outbound_event(self, event: OutboundEvent) -> None:
         """处理出站事件，将响应放入队列。"""
         await self.response_queue.put(event)
