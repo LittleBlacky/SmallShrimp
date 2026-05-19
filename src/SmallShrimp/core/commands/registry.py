@@ -27,8 +27,19 @@ class CommandRegistry:
         name = parts[0]
         args = parts[1].split() if len(parts) > 1 else []
         return (name, args)
-    
+
     @classmethod
+    async def dispatch(cls, user_input: str, context: "CommandContext") -> "str | None":
+        """异步解析并执行命令。"""
+        parsed = cls.parse(user_input)
+        if not parsed:
+            return None
+        name, args = parsed
+        cmd = cls.get(name)
+        if not cmd or not cmd.handler:
+            return None
+        return await cmd.handler(context, args)
+
     def from_modules(cls, *modules):
         """从模块自动注册命令。"""
         for module in modules:
