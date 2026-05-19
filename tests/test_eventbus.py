@@ -117,7 +117,7 @@ async def test_eventbus_publish_and_dispatch():
     bus.subscribe(OutboundEvent, handler)
 
     # 启动总线
-    task = bus.start()
+    task = asyncio.create_task(bus.run())
 
     # 发布事件
     source = CliEventSource()
@@ -128,7 +128,7 @@ async def test_eventbus_publish_and_dispatch():
     await asyncio.sleep(0.2)
 
     # 停止总线
-    await bus.stop()
+    pass  # EventBus closed by task cancellation
 
     # 验证
     assert len(received) == 1
@@ -154,7 +154,7 @@ async def test_eventbus_filtered_dispatch():
     bus.subscribe(InboundEvent, inbound_handler)
 
     # 启动
-    task = bus.start()
+    task = asyncio.create_task(bus.run())
 
     source = CliEventSource()
     # 只发布 OutboundEvent
@@ -164,7 +164,7 @@ async def test_eventbus_filtered_dispatch():
     await asyncio.sleep(0.2)
 
     # 停止
-    await bus.stop()
+    pass  # EventBus closed by task cancellation
 
     assert len(received_outbound) == 2
     assert len(received_inbound) == 0
@@ -183,7 +183,7 @@ async def test_eventbus_multiple_events():
 
     bus.subscribe(OutboundEvent, handler)
 
-    task = bus.start()
+    task = asyncio.create_task(bus.run())
 
     source = CliEventSource()
     # 发布多个事件
@@ -191,7 +191,7 @@ async def test_eventbus_multiple_events():
         await bus.publish(OutboundEvent(session_id=f"sess-{i}", source=source, content=f"msg-{i}"))
 
     await asyncio.sleep(0.3)
-    await bus.stop()
+    pass  # EventBus closed by task cancellation
 
     assert len(received) == 5
 

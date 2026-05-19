@@ -128,7 +128,7 @@ class ChatLoop:
         self.console.print("Type '/help' for commands, 'quit' or 'exit' to end.\n")
 
         # 启动 EventBus Worker
-        self.context.eventbus.start()
+        self._eventbus_task = asyncio.create_task(self.context.eventbus.run())
 
         session_id = self.session.session_id
 
@@ -165,7 +165,12 @@ class ChatLoop:
         except (KeyboardInterrupt, EOFError):
             self.console.print("\n[bold yellow]Goodbye![/bold yellow]")
         finally:
-            await self.context.eventbus.stop()
+            if self._eventbus_task:
+                self._eventbus_task.cancel()
+                try:
+                    await self._eventbus_task
+                except asyncio.CancelledError:
+                    pass
 
 
 def run_chat(config: Config, agent_id: str | None = None) -> None:

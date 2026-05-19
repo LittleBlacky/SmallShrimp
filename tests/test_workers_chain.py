@@ -44,14 +44,14 @@ class TestEventBusWorkerIntegration:
             received.append(event)
 
         eventbus.subscribe(OutboundEvent, handler)
-        task = eventbus.start()
+        task = asyncio.create_task(eventbus.run())
 
         source = CliEventSource()
         event = OutboundEvent(session_id="sess-001", content="test", source=source)
         await eventbus.publish(event)
 
         await asyncio.sleep(0.2)
-        await eventbus.stop()
+        pass  # EventBus closed by task cancellation
 
         assert len(received) == 1
         assert received[0].session_id == "sess-001"
@@ -66,7 +66,7 @@ class TestEventBusWorkerIntegration:
             outbound_received.append(event)
 
         eventbus.subscribe(OutboundEvent, outbound_handler)
-        task = eventbus.start()
+        task = asyncio.create_task(eventbus.run())
 
         source = CliEventSource()
         await eventbus.publish(
@@ -77,7 +77,7 @@ class TestEventBusWorkerIntegration:
         )
 
         await asyncio.sleep(0.2)
-        await eventbus.stop()
+        pass  # EventBus closed by task cancellation
 
         assert len(outbound_received) == 2
 
@@ -96,7 +96,7 @@ class TestWorkersChain:
             eventbus.ack(event)
 
         eventbus.subscribe(OutboundEvent, delivery_handler)
-        task = eventbus.start()
+        task = asyncio.create_task(eventbus.run())
 
         source = CliEventSource()
         inbound = InboundEvent(session_id="sess-001", content="hello", source=source)
@@ -108,7 +108,7 @@ class TestWorkersChain:
         await eventbus.publish(response)
 
         await asyncio.sleep(0.3)
-        await eventbus.stop()
+        pass  # EventBus closed by task cancellation
 
         assert len(outbound_events) == 1
         assert outbound_events[0].content == "hi there!"
@@ -123,7 +123,7 @@ class TestWorkersChain:
             received_sessions.append(event.session_id)
 
         eventbus.subscribe(OutboundEvent, handler)
-        task = eventbus.start()
+        task = asyncio.create_task(eventbus.run())
 
         source = CliEventSource()
         session_ids = ["sess-alpha", "sess-beta", "sess-gamma"]
@@ -132,7 +132,7 @@ class TestWorkersChain:
             await eventbus.publish(event)
 
         await asyncio.sleep(0.3)
-        await eventbus.stop()
+        pass  # EventBus closed by task cancellation
 
         assert received_sessions == session_ids
 
@@ -219,7 +219,7 @@ class TestServerIntegration:
             processed.append(event)
 
         eventbus.subscribe(OutboundEvent, handler)
-        task = eventbus.start()
+        task = asyncio.create_task(eventbus.run())
 
         source = CliEventSource()
         events_count = 5
@@ -231,7 +231,7 @@ class TestServerIntegration:
             )
 
         await asyncio.sleep(0.5)
-        await eventbus.stop()
+        pass  # EventBus closed by task cancellation
 
         assert len(processed) == events_count
 

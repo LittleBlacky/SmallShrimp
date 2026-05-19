@@ -25,6 +25,7 @@ class Server:
         self.context = context
         self.workers: list[Worker] = []
         self._api_task: asyncio.Task | None = None
+        self._eventbus_task: asyncio.Task | None = None
 
     async def run(self) -> None:
         """启动所有 Workers 并监控崩溃。"""
@@ -45,7 +46,6 @@ class Server:
         self.context.websocket_worker = ws_worker
 
         self.workers = [
-            self.context.eventbus,  # EventBus (主动 Worker)
             AgentWorker(self.context),  # SubscriberWorker
             DeliveryWorker(self.context),  # SubscriberWorker
             CronWorker(self.context),  # CronWorker (主动 Worker)
@@ -60,7 +60,10 @@ class Server:
         logger.info(f"Server 设置完成，共 {len(self.workers)} 个核心 Workers")
 
     def _start_workers(self) -> None:
-        """启动所有 Workers。"""
+        """启动所有 Workers 和 EventBus。"""
+        self._eventbus_task = asyncio.create_task(self.context.eventbus.run())
+        logger.info("EventBus 已启动")
+
         for worker in self.workers:
             worker.start()
             logger.info(f"已启动 {worker.__class__.__name__}")
@@ -82,9 +85,15 @@ class Server:
             await asyncio.sleep(5)
 
     async def _stop_all(self) -> None:
-        """优雅停止所有 Workers。"""
+        """优雅停止所有 Workers 和 EventBus。"""
         for worker in self.workers:
             await worker.stop()
+        if self._eventbus_task:
+            self._eventbus_task.cancel()
+            try:
+                await self._eventbus_task
+            except asyncio.CancelledError:
+                pass
 
     async def start_api(self, host: str = "127.0.0.1", port: int = 8000) -> None:
         """启动 Web API 服务器。"""

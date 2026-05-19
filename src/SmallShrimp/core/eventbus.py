@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, TypeVar
 
 from .events import Event, OutboundEvent, deserialize_event
-from .worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +16,10 @@ E = TypeVar("E", bound=Event)
 Handler = Callable[[Event], Awaitable[None]]
 
 
-class EventBus(Worker):
+class EventBus:
     """事件总线，支持订阅和异步分发。"""
 
     def __init__(self, pending_dir: Path | None = None) -> None:
-        super().__init__()
         self._subscribers: dict[type[Event], list[Handler]] = defaultdict(list)
         # 尝试初始化队列，在没有事件循环的测试环境中会失败
         try:
