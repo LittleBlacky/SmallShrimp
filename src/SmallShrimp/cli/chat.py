@@ -59,7 +59,7 @@ class ChatLoop:
                 from ..core.commands.registry import CommandRegistry
                 from ..core.commands.handlers import CommandContext
 
-                cmd_context = CommandContext(self.session)
+                cmd_context = CommandContext(self.session, routing_table=self.context.routing_table)
                 result = await CommandRegistry.dispatch(event.content, cmd_context)
                 if result:
                     await self.context.eventbus.publish(

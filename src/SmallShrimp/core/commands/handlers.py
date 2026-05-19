@@ -1,23 +1,30 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 from .registry import register_command
 from ..skill_loader import SkillLoader
 from ..memory import MemoryManager
 
+if TYPE_CHECKING:
+    from ..routing import RoutingTable
+    from ..agent import AgentSession
+
 class CommandContext:
     """命令执行的上下文。"""
-    def __init__(self, session: "AgentSession") -> None:
+    def __init__(
+        self,
+        session: "AgentSession",
+        routing_table: "RoutingTable | None" = None,
+    ) -> None:
         self.session = session
+        self.routing_table = routing_table
         self._memory_manager: MemoryManager | None = None
 
     @property
     def memory(self) -> MemoryManager:
         if self._memory_manager is None:
-            # 从会话获取 memory_dir，或使用默认路径
-            shared = self.session.state.shared_context
-            if shared and hasattr(shared, 'memory_manager'):
-                self._memory_manager = shared.memory_manager
-            else:
-                from pathlib import Path
-                self._memory_manager = MemoryManager(Path("workspace/memories"))
+            from pathlib import Path
+            self._memory_manager = MemoryManager(Path("workspace/memories"))
         return self._memory_manager
 
 @register_command(name="skill", description="加载技能内容", usage="/skill <name>")
@@ -155,4 +162,60 @@ async def cmd_notes(context: CommandContext, args: list[str]) -> str:
     lines = [f"近期 {len(notes)} 篇笔记:\n"]
     for n in notes:
         lines.append(f"  📅 {n['date']} ({n['size']} bytes)")
+    return "\n".join(lines)
+
+
+# ── 路由管理命令 ──
+
+@register_command(name="route", description="添加路由规则", usage="/route <pattern> <agent>")
+async def cmd_route(context: CommandContext, args: list[str]) -> str:
+    """添加路由绑定。"""
+    if len(args) < 2:
+        return "用法: /route <source_pattern> <agent_id>\n例如: /route platform-telegram:.* cookie"
+    pattern, agent_id = args[0], args[1]
+    table = context.routing_table
+    if table is None:
+        return "路由表不可用（需 Server 模式）"
+    table.persist_binding(pattern, agent_id)
+    return f"✓ 已绑定: `{pattern}` → `{agent_id}`"
+
+
+@register_command(name="bindings", description="查看当前路由绑定", usage="/bindings")
+async def cmd_bindings(context: CommandContext, args: list[str]) -> str:
+    """列出所有路由绑定。"""
+    table = context.routing_table
+    if table is None:
+        return "路由表不可用（需 Server 模式）"
+    bindings = table.get_bindings()
+    if not bindings:
+        return "暂无路由绑定，所有消息走默认 Agent。"
+    lines = ["当前路由绑定（按优先级）:"]
+    for b in bindings:
+        tier_name = {0: "精确", 1: "正则", 2: "通配"}.get(b.tier, str(b.tier))
+        lines.append(f"  [{tier_name}] {b.value} → {b.agent}")
+    return "\n".join(lines)
+
+
+@register_command(name="agents", description="查看可用 Agent", usage="/agents")
+async def cmd_agents(context: CommandContext, args: list[str]) -> str:
+    """列出所有可用 Agent。"""
+    agent = context.session.agent
+    loader = agent.agent_def.__class__.__name__  # 需要 AgentLoader
+    # 通过 session agent 的 history 路径反推 agents_dir
+    from pathlib import Path
+    from ..agent_loader import AgentLoader
+
+    history_path = getattr(agent.history_manager, 'sessions_dir', Path("workspace/sessions"))
+    agents_dir = history_path.parent / "agents"
+    if not agents_dir.exists():
+        agents_dir = Path("workspace/agents")
+
+    loader = AgentLoader(agents_dir)
+    agents = loader.discover_agents()
+    current_id = agent.agent_def.id or agent.agent_def.name
+
+    lines = ["可用 Agent:"]
+    for a in agents:
+        mark = " (当前)" if (a.id or a.name) == current_id else ""
+        lines.append(f"  • `{a.id or a.name}`{mark} - {a.description}")
     return "\n".join(lines)

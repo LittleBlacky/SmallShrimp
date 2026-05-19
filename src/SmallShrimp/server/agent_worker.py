@@ -77,7 +77,7 @@ class AgentWorker(SubscriberWorker):
             # 优先检查斜杠命令
             if event.content.startswith("/"):
                 from ..core.commands.handlers import CommandContext
-                cmd_context = CommandContext(session)
+                cmd_context = CommandContext(session, routing_table=self.context.routing_table)
                 result = await self.context.command_registry.dispatch(
                     event.content, cmd_context
                 )
