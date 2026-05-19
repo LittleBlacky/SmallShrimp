@@ -2,49 +2,7 @@ from __future__ import annotations
 """ContextGuard 测试。"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from src.SmallShrimp.core.context_guard import ContextGuard, MEMORY_LINE_RE
-
-
-def test_memory_line_regex_no_tags():
-    """MEMORY 行可以不带 tags。"""
-    match = MEMORY_LINE_RE.match("MEMORY: 用户喜欢使用 dark mode")
-    assert match is not None
-    assert match.group(1) == "用户喜欢使用 dark mode"
-    assert match.group(2) is None
-
-
-def test_memory_line_regex_with_tags():
-    """MEMORY 行可以带 tags。"""
-    match = MEMORY_LINE_RE.match("MEMORY: 用户偏好 Python [tags: preference, auto]")
-    assert match is not None
-    assert match.group(1) == "用户偏好 Python"
-    assert match.group(2) == "preference, auto"
-
-
-def test_memory_line_regex_case_insensitive():
-    """MEMORY 行匹配不区分大小写。"""
-    match = MEMORY_LINE_RE.match("memory: test content [tags: fact]")
-    assert match is not None
-    assert match.group(1) == "test content"
-
-
-def test_memory_line_regex_multiline():
-    """MEMORY 行支持多行匹配。"""
-    text = """Summary line 1
-    MEMORY: 用户用的是 VSCode [tags: fact, preference]
-    Some other content
-    MEMORY: 项目名叫 SmallShrimp [tags: fact]"""
-    matches = list(MEMORY_LINE_RE.finditer(text))
-    assert len(matches) == 2
-    assert matches[0].group(1) == "用户用的是 VSCode"
-    assert "fact" in matches[0].group(2)
-    assert matches[1].group(1) == "项目名叫 SmallShrimp"
-
-
-def test_memory_line_regex_no_match():
-    """普通文本不匹配 MEMORY 正则。"""
-    assert MEMORY_LINE_RE.match("Just some text") is None
-    assert MEMORY_LINE_RE.match("MEMORY without colon") is None
+from src.SmallShrimp.core.context_guard import ContextGuard
 
 
 def test_context_guard_init():
@@ -149,11 +107,6 @@ async def test_check_and_compact_under_threshold():
 
 
 if __name__ == "__main__":
-    test_memory_line_regex_no_tags()
-    test_memory_line_regex_with_tags()
-    test_memory_line_regex_case_insensitive()
-    test_memory_line_regex_multiline()
-    test_memory_line_regex_no_match()
     test_context_guard_init()
     test_context_guard_default_threshold()
     test_truncate_large_tool_results()

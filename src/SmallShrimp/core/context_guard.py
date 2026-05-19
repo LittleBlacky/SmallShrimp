@@ -4,49 +4,37 @@ from __future__ import annotations
 """Context guard for proactive context window management."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Sequence
-import re
+from typing import TYPE_CHECKING
 
 from litellm import token_counter
 
 if TYPE_CHECKING:
     from .session_state import SessionState
-    from .memory import MemoryManager
 
 from .message import Message, ToolMessage
 
 MAX_TOOL_RESULT_CHARS = 10000
 
-MEMORY_LINE_RE = re.compile(r"^[ \t]*MEMORY:\s*(.+?)(?:\s*\[tags:\s*([^\]]+)\])?\s*$", re.MULTILINE | re.IGNORECASE)
+COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
 
-COMPACT_PROMPT = """Your task is two things:
+Your summary should include:
+1. Primary Request and Intent
+2. Key Facts and User Preferences
+3. User Messages (ALL user messages)
+4. Errors and Corrections
+5. Current Work and Pending Tasks
 
-1. SUMMARIZE the conversation concisely, capturing:
-   - Primary Request and Intent
-   - Key Facts and User Preferences
-   - Current Work and Pending Tasks
-
-2. EXTRACT important memories to save, format each as:
-   MEMORY: <content> [tags: preference|fact|progress|context]
-
-Here is the conversation:
+Here is the conversation to summarize:
 
 {conversation}
 
-Provide your summary and memories:"""
+Please provide your summary following this structure."""
 
 
 class ContextGuard:
 
-    def __init__(self, token_threshold: int = 160000, memory_manager: "MemoryManager | None" = None):
+    def __init__(self, token_threshold: int = 160000):
         self.token_threshold = token_threshold  # 默认 80% of 200k context
-        self.memory_manager = memory_manager
-
-    def _get_memory_manager(self, state: "SessionState") -> "MemoryManager | None":
-        """从 SessionState 获取 MemoryManager。"""
-        if self.memory_manager:
-            return self.memory_manager
-        return None
 
     def estimate_tokens(self, state: "SessionState") -> int:
         """估算当前消息列表的 token 数量"""
@@ -77,7 +65,7 @@ class ContextGuard:
         return truncated
 
     async def _compact_messages(self, state: "SessionState") -> "SessionState":
-        """压缩旧消息：用 LLM 总结历史，同时自动保存记忆。"""
+        """压缩旧消息：用 LLM 总结历史。"""
         history_msgs = state.messages
 
         # 收集历史用于总结
@@ -94,27 +82,7 @@ class ContextGuard:
             {"role": "user", "content": prompt}
         ])
 
-        llm_output = summary_response.get("content", "")
-
-        # 解析 MEMORY 行
-        memory_mgr = self._get_memory_manager(state)
-        if memory_mgr:
-            for match in MEMORY_LINE_RE.finditer(llm_output):
-                content = match.group(1).strip()
-                tags_str = match.group(2) or ""
-                tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
-                if content and "auto" not in tags:
-                    tags.append("auto")
-                if content:
-                    try:
-                        memory_mgr.remember(content, tags=tags if tags else ["auto"])
-                    except Exception:
-                        pass
-
-        # 分离 summary 和其他内容（MEMORY 行不放入压缩消息）
-        lines = llm_output.split("\n")
-        summary_lines = [l for l in lines if not MEMORY_LINE_RE.match(l.strip())]
-        summary = "\n".join(summary_lines).strip()
+        summary = summary_response.get("content", "")
 
         # 构建压缩后的消息：系统消息 + 总结消息 + 最近消息
         from .message import SystemMessage, AssistantMessage, HumanMessage

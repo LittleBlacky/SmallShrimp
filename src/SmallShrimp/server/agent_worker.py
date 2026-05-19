@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from .worker import SubscriberWorker
 from ..core.agent import Agent
 from ..core.events import InboundEvent, OutboundEvent, CliEventSource
-from ..core.context_guard import ContextGuard
 from ..core.commands.registry import CommandRegistry
 
 if TYPE_CHECKING:
@@ -62,10 +61,6 @@ class AgentWorker(SubscriberWorker):
                 self.context.tool_registry,
                 self.context.history_manager,
                 prompt_builder=self.context.prompt_builder,
-                context_guard=ContextGuard(
-                    token_threshold=int(agent_def.llm.get("context_window", 200000) * 0.8),
-                    memory_manager=self.context.memory_manager,
-                ),
             )
 
             # 恢复或创建会话
