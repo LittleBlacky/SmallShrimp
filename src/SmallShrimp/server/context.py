@@ -8,6 +8,7 @@ from ..core.routing import RoutingTable
 
 if TYPE_CHECKING:
     from ..core.agent_loader import AgentLoader
+    from ..core.cron_loader import CronLoader
     from ..core.history import HistoryManager
     from ..core.eventbus import EventBus
     from ..core.commands.registry import CommandRegistry
@@ -32,6 +33,7 @@ class Context:
     command_registry: "CommandRegistry"
     prompt_builder: "PromptBuilder"
     memory_manager: "MemoryManager"
+    cron_loader: "CronLoader"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
     channels: list["Channel"] = field(default_factory=list)
     routing_table: "RoutingTable | None" = field(default=None)
@@ -48,6 +50,7 @@ class Context:
         from ..core.commands.registry import CommandRegistry
         from ..core.prompt_builder import PromptBuilder
         from ..core.memory import MemoryManager
+        from ..core.cron_loader import CronLoader
         from ..tools import create_tool_registry
         from ..channels import create_channels_from_config
 
@@ -59,6 +62,7 @@ class Context:
         history_manager = HistoryManager(workspace / "sessions")
         prompt_builder = PromptBuilder(workspace)
         memory_manager = MemoryManager(workspace / "memories")
+        cron_loader = CronLoader(workspace / "crons")
 
         # 事件总线
         pending_dir = workspace / "events" / "pending"
@@ -84,6 +88,7 @@ class Context:
             command_registry=command_registry,
             prompt_builder=prompt_builder,
             memory_manager=memory_manager,
+            cron_loader=cron_loader,
             workspace=workspace,
             channels=channels,
         )

@@ -44,6 +44,7 @@ def test_context_dataclass_manual():
     command_registry = MagicMock()
     prompt_builder = MagicMock()
     memory_manager = MagicMock()
+    cron_loader = MagicMock()
 
     context = Context(
         config=config,
@@ -55,6 +56,7 @@ def test_context_dataclass_manual():
         command_registry=command_registry,
         prompt_builder=prompt_builder,
         memory_manager=memory_manager,
+        cron_loader=cron_loader,
     )
 
     assert context.agent_loader is agent_loader

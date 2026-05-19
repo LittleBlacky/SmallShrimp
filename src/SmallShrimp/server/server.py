@@ -11,6 +11,7 @@ from .agent_worker import AgentWorker
 from .delivery_worker import DeliveryWorker
 from .channel_worker import ChannelWorker
 from .websocket_worker import WebSocketWorker
+from .cron_worker import CronWorker
 from .app import create_app
 from .context import Context
 
@@ -47,6 +48,7 @@ class Server:
             self.context.eventbus,  # EventBus (主动 Worker)
             AgentWorker(self.context),  # SubscriberWorker
             DeliveryWorker(self.context),  # SubscriberWorker
+            CronWorker(self.context),  # CronWorker (主动 Worker)
             ws_worker,  # WebSocketWorker (SubscriberWorker)
         ]
 
