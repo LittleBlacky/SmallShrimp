@@ -24,26 +24,31 @@ MAX_RETRIES = 3
 
 
 class AgentWorker(SubscriberWorker):
-    """将事件分发给会话执行器的 Worker，带并发控制。"""
+    """将事件分发给会话执行器的 Worker，按用户控制并发。
+
+    同一用户最多 per_user_concurrency 个并发 turn。
+    """
 
     CLEANUP_THRESHOLD = 5
+    DEFAULT_PER_USER_CONCURRENCY = 3
 
     def __init__(self, context: "Context") -> None:
         super().__init__(context)
         self._semaphores: dict[str, asyncio.Semaphore] = {}
-        self._semaphore_limits: dict[str, int] = {}  # 记录每个 Agent 的 max_concurrency
         self._cleanup_counter = 0
         self.context.eventbus.subscribe(InboundEvent, self.dispatch_event)
         self.context.eventbus.subscribe(DispatchEvent, self.dispatch_event)
         self.logger.info("AgentWorker 已订阅 InboundEvent 和 DispatchEvent 事件")
 
-    def _get_or_create_semaphore(self, agent_def) -> asyncio.Semaphore:
-        """获取或创建指定 Agent 的信号量。"""
-        agent_id = agent_def.id or agent_def.name
-        if agent_id not in self._semaphores:
-            self._semaphores[agent_id] = asyncio.Semaphore(agent_def.max_concurrency)
-            self._semaphore_limits[agent_id] = agent_def.max_concurrency
-        return self._semaphores[agent_id]
+    def _user_key(self, source) -> str:
+        """从事件来源提取用户标识。"""
+        return str(getattr(source, 'source', source))
+
+    def _get_or_create_semaphore(self, key: str, limit: int) -> asyncio.Semaphore:
+        """获取或创建指定用户的信号量。"""
+        if key not in self._semaphores:
+            self._semaphores[key] = asyncio.Semaphore(limit)
+        return self._semaphores[key]
 
     def _maybe_cleanup_semaphores(self) -> None:
         """定期清理完全空闲的信号量。"""
@@ -52,12 +57,11 @@ class AgentWorker(SubscriberWorker):
             return
         self._cleanup_counter = 0
         stale = [
-            aid for aid, sem in self._semaphores.items()
-            if not sem._waiters and sem._value == self._semaphore_limits.get(aid, 1)
+            key for key, sem in self._semaphores.items()
+            if not sem._waiters and sem._value == self.DEFAULT_PER_USER_CONCURRENCY
         ]
-        for aid in stale:
-            del self._semaphores[aid]
-            del self._semaphore_limits[aid]
+        for key in stale:
+            del self._semaphores[key]
 
     async def dispatch_event(self, event: ProcessableEvent) -> None:
         """为类型事件创建执行器任务。"""
@@ -82,8 +86,10 @@ class AgentWorker(SubscriberWorker):
         asyncio.create_task(self.exec_session(event, agent_def))
 
     async def exec_session(self, event: ProcessableEvent, agent_def: "AgentDef") -> None:
-        """使用给定 Agent 执行会话（受并发控制）。"""
-        sem = self._get_or_create_semaphore(agent_def)
+        """使用给定 Agent 执行会话（按用户控制并发）。"""
+        user_key = self._user_key(event.source if hasattr(event, 'source') else event)
+        limit = agent_def.max_concurrency if agent_def.max_concurrency > 0 else self.DEFAULT_PER_USER_CONCURRENCY
+        sem = self._get_or_create_semaphore(user_key, limit)
         session_id = event.session_id
 
         async with sem:
