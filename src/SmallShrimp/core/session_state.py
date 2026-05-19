@@ -77,12 +77,17 @@ class SessionState:
         """估算 token 数量（粗略：英文约 4 字符/token，中文约 2 字符/token）。"""
         if not text:
             return 0
-        chinese_chars = sum(1 for c in text if '一' <= c <= '鿿')
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
         other_chars = len(text) - chinese_chars
         return int(chinese_chars / 2 + other_chars / 4)
 
     def _build_system_prompt(self) -> str:
-        """从 Agent 定义构建完整的系统提示。"""
+        """从 Agent 定义构建系统提示，优先使用 PromptBuilder。"""
+        # 优先使用 PromptBuilder（多层提示词）
+        if self.shared_context and hasattr(self.shared_context, 'prompt_builder'):
+            return self.shared_context.prompt_builder.build(self)
+
+        # 回退：旧版简单构建
         agent_def = self.agent.agent_def
 
         parts = [

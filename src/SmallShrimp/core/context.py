@@ -9,6 +9,7 @@ from .agent_loader import AgentLoader
 from .skill_loader import SkillLoader
 from .commands.registry import CommandRegistry
 from .commands.handlers import CommandContext
+from .prompt_builder import PromptBuilder
 
 if TYPE_CHECKING:
     from .events import OutboundEvent, InboundEvent
@@ -29,6 +30,7 @@ class SharedContext:
         self.agent_loader = AgentLoader(Path("workspace/agents"))
         self.skill_loader = SkillLoader(Path("workspace/skills"))
         self.eventbus = EventBus(self)
+        self.prompt_builder = PromptBuilder(self)
 
         # 命令注册表 - 自动注册内置命令
         self.command_registry = CommandRegistry.with_builtins()

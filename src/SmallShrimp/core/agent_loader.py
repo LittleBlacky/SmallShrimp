@@ -8,9 +8,19 @@ class AgentLoader:
 
     def load(self, name: str) -> AgentDef:
         agent_path = self.agents_dir / name / "AGENT.md"
-        return AgentDef.from_file(agent_path)
+        agent_def = AgentDef.from_file(agent_path)
+        # Load SOUL.md if exists
+        agent_def.soul_md = self._load_soul_md(name)
+        return agent_def
 
     def list_agents(self) -> list[str]:
         if not self.agents_dir.exists():
             return []
         return [d.name for d in self.agents_dir.iterdir() if d.is_dir()]
+
+    def _load_soul_md(self, agent_id: str) -> str:
+        """Load SOUL.md file for an agent if it exists."""
+        soul_path = self.agents_dir / agent_id / "SOUL.md"
+        if soul_path.exists():
+            return soul_path.read_text(encoding="utf-8").strip()
+        return ""
