@@ -117,6 +117,8 @@ class AgentSession:
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
         self._trust_checked = False  # Trust Dialog 是否已检查
         self._on_tool_call = None  # 工具调用回调 (CLI 显示用)
+        self._on_thinking = None  # 思考内容回调
+        self._confirm_fn = None  # 确认回调
 
     @property
     def session_id(self) -> str:
@@ -129,6 +131,10 @@ class AgentSession:
     def set_on_tool_call(self, fn):
         """注入工具调用回调。fn(tool_name, args, result, failed)."""
         self._on_tool_call = fn
+
+    def set_on_thinking(self, fn):
+        """注入思考内容回调。fn(reasoning_text)."""
+        self._on_thinking = fn
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
@@ -188,6 +194,13 @@ class AgentSession:
             reasoning = response.get("reasoning_content")
             should_store = response.get("should_store_reasoning", False)
             finish_reason = response.get("finish_reason", "stop")
+
+            # 回调 CLI 显示思考内容
+            if reasoning and self._on_thinking:
+                try:
+                    self._on_thinking(reasoning)
+                except Exception:
+                    pass
 
             if finish_reason == "tool_calls" and response["tool_calls"]:
 

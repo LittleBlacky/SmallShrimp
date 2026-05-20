@@ -56,6 +56,8 @@ class ChatLoop:
 
         # 注入工具调用回调 —— 实时显示
         self.session.set_on_tool_call(self._display_tool_call)
+        # 注入思考内容回调
+        self.session.set_on_thinking(self._display_thinking)
 
         # 订阅 InboundEvent - 直接处理消息
         self.context.eventbus.subscribe(InboundEvent, self.handle_inbound_event)
@@ -133,6 +135,12 @@ class ChatLoop:
             self.console.print(f"    [red]✗ {result_preview}[/red]")
         else:
             self.console.print(f"    [dim]  {result_preview}[/dim]")
+
+    def _display_thinking(self, reasoning: str) -> None:
+        """显示 LLM 思考过程。"""
+        preview = reasoning[:300].replace("\n", " ")
+        suffix = "..." if len(reasoning) > 300 else ""
+        self.console.print(f"  [dim italic]💭 {preview}{suffix}[/dim italic]")
 
     def display_agent_response(self, content: str) -> None:
         """显示 Agent 响应。"""
