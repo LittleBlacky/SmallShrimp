@@ -55,11 +55,14 @@ class Agent:
         mode_str = agent_def.llm.get("permission_mode", "default")
         perm_mode = PermissionMode(mode_str) if mode_str in PermissionMode.__members__ else PermissionMode.DEFAULT
         self.permission_checker = PermissionChecker(perm_mode)
+<<<<<<< HEAD
         # Trust manager — Layer 1 defense
         from ..core.trust import TrustManager
         self.trust_manager = TrustManager(
             state_path=str(config.data.get("workspace", "workspace")) + "/.cache/trust.json"
         )
+=======
+>>>>>>> 56b327e (feat: 权限规则文件 + 路径验证（deny 规则优先，保护 .env/.git/系统目录）)
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -257,9 +260,14 @@ class AgentSession:
             # 权限检查
             perm = self.agent.permission_checker.check(name, args)
             if perm.needs_confirmation:
+<<<<<<< HEAD
                 confirm_fn = getattr(self, '_confirm_fn', None)
                 if confirm_fn:
                     approved = confirm_fn(perm.message)
+=======
+                if self._confirm_fn:
+                    approved = self._confirm_fn(perm.message)
+>>>>>>> 56b327e (feat: 权限规则文件 + 路径验证（deny 规则优先，保护 .env/.git/系统目录）)
                     if approved is False:
                         self.state.add_message(ToolMessage(
                             content=f"Error: {name} denied by user.",

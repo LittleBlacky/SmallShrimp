@@ -168,6 +168,7 @@ class PermissionChecker:
             if err:
                 return PermissionResult(action="deny", message=err)
 
+<<<<<<< HEAD
         # ── Layer 4: Shell command guard ──
         if tool_name == "shell":
             from ..core.shell_guard import check_shell_command
@@ -180,6 +181,8 @@ class PermissionChecker:
                         message=f"Blocked: {', '.join(check.blocked)}",
                     )
 
+=======
+>>>>>>> 56b327e (feat: 权限规则文件 + 路径验证（deny 规则优先，保护 .env/.git/系统目录）)
         # ── Layer 3: Deny rules (override everything including bypass) ──
         for rule in self.rules.deny:
             if rule.matches(tool_name, path):
