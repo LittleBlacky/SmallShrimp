@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -54,6 +55,11 @@ class Agent:
         mode_str = agent_def.llm.get("permission_mode", "default")
         perm_mode = PermissionMode(mode_str) if mode_str in PermissionMode.__members__ else PermissionMode.DEFAULT
         self.permission_checker = PermissionChecker(perm_mode)
+        # Trust manager — Layer 1 defense
+        from ..core.trust import TrustManager
+        self.trust_manager = TrustManager(
+            state_path=str(config.data.get("workspace", "workspace")) + "/.cache/trust.json"
+        )
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -109,7 +115,7 @@ class AgentSession:
         from ..core.tool_guardrails import ToolGuardrailController
         self._guardrail = ToolGuardrailController()
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
-        self._confirm_fn = None  # 外部确认回调（CLI/server 注入）
+        self._trust_checked = False  # Trust Dialog 是否已检查
 
     @property
     def session_id(self) -> str:
@@ -141,6 +147,19 @@ class AgentSession:
         # 重置本轮 guardrail 计数器
         self._guardrail.reset()
         self._turn_failures.clear()
+
+        # Trust Dialog — 首次进入工作区检查信任
+        if not self._trust_checked:
+            self._trust_checked = True
+            cwd = os.getcwd()
+            if not self.agent.trust_manager.is_trusted(cwd):
+                warnings = self.agent.trust_manager.scan_dangerous(cwd)
+                if warnings and (confirm_fn := getattr(self, '_confirm_fn', None)):
+                    approved = confirm_fn(
+                        f"Trust directory '{cwd}'?\nDetected: {', '.join(warnings[:5])}"
+                    )
+                    if approved:
+                        self.agent.trust_manager.trust(cwd)
 
         # 循环：直到 LLM 返回普通回复
         while True:
@@ -238,8 +257,9 @@ class AgentSession:
             # 权限检查
             perm = self.agent.permission_checker.check(name, args)
             if perm.needs_confirmation:
-                if self._confirm_fn:
-                    approved = self._confirm_fn(perm.message)
+                confirm_fn = getattr(self, '_confirm_fn', None)
+                if confirm_fn:
+                    approved = confirm_fn(perm.message)
                     if approved is False:
                         self.state.add_message(ToolMessage(
                             content=f"Error: {name} denied by user.",
