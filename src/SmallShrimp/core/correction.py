@@ -1,11 +1,8 @@
 """User-correction detector — catches high-signal teaching moments.
 
-When the user says "不对" / "actually" / "I meant", this is a prime
-memory-writing trigger. The detector is stateless and deterministic.
-
-Confidence levels:
-  HIGH   — explicit correction ("you're wrong", "actually", "我意思是")
-  MEDIUM — softer correction ("应该是", "should be", "不是这样")
+Two detection layers:
+  1. Keyword regex (zero-cost, immediate)
+  2. Structural analysis — short message after tool results (zero-cost)
 """
 from __future__ import annotations
 
@@ -25,7 +22,10 @@ class CorrectionConfidence(str, Enum):
 class CorrectionSignal:
     confidence: CorrectionConfidence
     phrase: str
+    source: str = "keyword"  # "keyword" | "structural"
 
+
+# ── Layer 1: Keyword regex ─────────────────────────────────
 
 # Ordered: high-confidence patterns checked first (first match wins).
 _CORRECTION_PATTERNS: list[tuple[str, CorrectionConfidence]] = [
@@ -60,7 +60,7 @@ _COMPILED: list[tuple[re.Pattern[str], CorrectionConfidence]] = [
 
 
 def detect_correction(text: str) -> CorrectionSignal | None:
-    """Detect if text contains a user correction. Returns first match or None."""
+    """Layer 1: keyword-based detection."""
     if not text or not isinstance(text, str):
         return None
     body = text.strip()
@@ -72,15 +72,81 @@ def detect_correction(text: str) -> CorrectionSignal | None:
             return CorrectionSignal(
                 confidence=confidence,
                 phrase=match.group(0).strip(),
+                source="keyword",
             )
     return None
 
+
+# ── Layer 2: Structural analysis ───────────────────────────
+
+# New-request patterns: if user message looks like a fresh request, it's
+# probably not a correction.
+_NEW_REQUEST_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"请|帮我|帮我|你能|可以|能否",
+        r"\bcan you\b|\bcould you\b|\bplease\b|\bhelp\b",
+        r"^读|^查|^搜|^写|^创建|^删除|^运行|^执行",
+        r"^\s*(read|find|search|write|create|delete|run|execute)\b",
+    ]
+]
+
+_TOOL_RESULT_MARKERS = [
+    "[Lines ", "[Content snipped", "[Old result cleared",
+    "[Result too large", "[Tool Loop Warning",
+    "Error:", "No files found", "No matches found",
+    "Written ", "Search results",
+]
+
+
+def detect_correction_structural(
+    user_text: str,
+    prev_assistant_content: str | None = None,
+) -> CorrectionSignal | None:
+    """Layer 2: structural heuristic — short message after tool result."""
+    body = user_text.strip()
+    if not body or len(body) > 200:
+        return None
+
+    # If it looks like a new request, not a correction
+    for pat in _NEW_REQUEST_PATTERNS:
+        if pat.search(body):
+            return None
+
+    # Check if previous turn had tool results
+    if prev_assistant_content:
+        has_tool_result = any(m in prev_assistant_content for m in _TOOL_RESULT_MARKERS)
+        if not has_tool_result:
+            return None
+    else:
+        return None  # No context to correct
+
+    return CorrectionSignal(
+        confidence=CorrectionConfidence.MEDIUM,
+        phrase=body[:50],
+        source="structural",
+    )
+
+
+# ── Combined detector ─────────────────────────────────────
+
+def detect_correction_combined(
+    user_text: str,
+    prev_assistant_content: str | None = None,
+) -> CorrectionSignal | None:
+    """Run both layers. Keyword wins if both fire."""
+    kw = detect_correction(user_text)
+    if kw:
+        return kw
+    return detect_correction_structural(user_text, prev_assistant_content)
+
+
+# ── Render ────────────────────────────────────────────────
 
 def render_correction_hint(signal: CorrectionSignal) -> str:
     """Produce a hint to prepend to the user message."""
     label = "HIGH" if signal.confidence == CorrectionConfidence.HIGH else "MEDIUM"
     return (
-        f"[Correction detected (confidence={label}): "
+        f"[Correction detected (confidence={label}, source={signal.source}): "
         f"user said \"{signal.phrase}\". "
         f"This is a teaching moment — review the prior exchange carefully "
         f"and update your understanding. Consider writing a memory note.]"

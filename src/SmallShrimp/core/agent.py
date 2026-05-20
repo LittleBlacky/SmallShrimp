@@ -111,9 +111,15 @@ class AgentSession:
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
-        # 检测用户纠正信号
-        from ..core.correction import detect_correction, render_correction_hint
-        correction = detect_correction(message)
+        # 检测用户纠正信号（关键词 + 结构分析）
+        from ..core.correction import detect_correction_combined, render_correction_hint
+        # 获取上一条 assistant 消息内容作为结构分析上下文
+        prev_assistant = ""
+        for m in reversed(self.state.messages):
+            if isinstance(m, AssistantMessage) and m.content:
+                prev_assistant = m.content or ""
+                break
+        correction = detect_correction_combined(message, prev_assistant)
         if correction:
             hint = render_correction_hint(correction)
             message = f"{hint}\n\n---\n\n{message}"
