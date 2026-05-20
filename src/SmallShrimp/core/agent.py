@@ -95,6 +95,10 @@ class AgentSession:
     state: SessionState
     started_at: datetime = field(default_factory=datetime.now)
 
+    def __post_init__(self):
+        from ..core.tool_guardrails import ToolGuardrailController
+        self._guardrail = ToolGuardrailController()
+
     @property
     def session_id(self) -> str:
         return self.state.session_id
@@ -104,6 +108,9 @@ class AgentSession:
         # 添加用户消息
         user_msg = HumanMessage(content=message)
         self.state.add_message(user_msg)
+
+        # 重置本轮 guardrail 计数器
+        self._guardrail.reset()
 
         # 循环：直到 LLM 返回普通回复
         while True:
@@ -161,10 +168,10 @@ class AgentSession:
             return response["content"] or ""
 
     async def _execute_tool_calls(self, tool_calls: list) -> None:
-        """并行执行只读工具，串行执行写工具。"""
+        """并行执行只读工具，串行执行写工具。含 guardrail 检测。"""
         import asyncio
+        from ..core.tool_guardrails import append_guardrail_warning
 
-        # 只读工具（可并行）
         READONLY_TOOLS = {"read", "glob", "grep", "websearch", "webread", "skill"}
         reads: list[tuple] = []
         writes: list[tuple] = []
@@ -181,21 +188,41 @@ class AgentSession:
         # 并行执行只读工具
         if reads:
             async def _run_read(tc, name, args):
-                result = await self.agent.tool_registry.execute_tool(name, **args)
-                return (tc, result)
+                try:
+                    result = await self.agent.tool_registry.execute_tool(name, **args)
+                    return (tc, name, args, result, False)
+                except Exception as e:
+                    return (tc, name, args, f"Error: {e}", True)
             results = await asyncio.gather(*(_run_read(*r) for r in reads))
-            for tc, result in results:
-                self.state.add_message(ToolMessage(
-                    content=result,
-                    tool_call_id=tc["id"],
-                    name=tc["function"]["name"],
-                ))
+            for tc, name, args, result, failed in results:
+                self._check_guardrail_and_add(name, args, result, failed, tc)
 
         # 串行执行写工具
         for tc, name, args in writes:
-            result = await self.agent.tool_registry.execute_tool(name, **args)
-            self.state.add_message(ToolMessage(
-                content=result,
-                tool_call_id=tc["id"],
-                name=name,
-            ))
+            try:
+                result = await self.agent.tool_registry.execute_tool(name, **args)
+                failed = result.startswith("Error:")
+            except Exception as e:
+                result = f"Error: {e}"
+                failed = True
+            self._check_guardrail_and_add(name, args, result, failed, tc)
+
+    def _check_guardrail_and_add(
+        self, name: str, args: dict, result: str, failed: bool, tc: dict
+    ) -> None:
+        """Guardrail 检查 + 添加 ToolMessage。"""
+        from ..core.tool_guardrails import append_guardrail_warning
+
+        is_read_only = name in {"read", "glob", "grep", "websearch", "webread", "skill"}
+        decision = self._guardrail.after_call(
+            name, args, result, failed=failed, is_read_only=is_read_only,
+        )
+
+        if decision.is_warning:
+            result = append_guardrail_warning(result, decision)
+
+        self.state.add_message(ToolMessage(
+            content=result,
+            tool_call_id=tc["id"],
+            name=name,
+        ))
