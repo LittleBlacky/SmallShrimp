@@ -116,6 +116,7 @@ class AgentSession:
         self._guardrail = ToolGuardrailController()
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
         self._trust_checked = False  # Trust Dialog 是否已检查
+        self._on_tool_call = None  # 工具调用回调 (CLI 显示用)
 
     @property
     def session_id(self) -> str:
@@ -124,6 +125,10 @@ class AgentSession:
     def set_confirm_fn(self, fn):
         """注入外部确认回调。fn(message) → True/False/None."""
         self._confirm_fn = fn
+
+    def set_on_tool_call(self, fn):
+        """注入工具调用回调。fn(tool_name, args, result, failed)."""
+        self._on_tool_call = fn
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
@@ -304,6 +309,13 @@ class AgentSession:
         # 记录失败用于跨轮次学习
         if failed:
             self._turn_failures.append({"tool_name": name, "error": result})
+
+        # 回调 CLI 显示
+        if self._on_tool_call:
+            try:
+                self._on_tool_call(name, args, result, failed)
+            except Exception:
+                pass
 
         self.state.add_message(ToolMessage(
             content=result,

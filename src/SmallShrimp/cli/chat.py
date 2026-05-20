@@ -54,6 +54,9 @@ class ChatLoop:
             lambda msg: Confirm.ask(f"\n[bold yellow]⚠ {msg}[/bold yellow]", default=False)
         )
 
+        # 注入工具调用回调 —— 实时显示
+        self.session.set_on_tool_call(self._display_tool_call)
+
         # 订阅 InboundEvent - 直接处理消息
         self.context.eventbus.subscribe(InboundEvent, self.handle_inbound_event)
 
@@ -115,6 +118,21 @@ class ChatLoop:
         prompt_text = Text("You", style="cyan")
         user_input = Prompt.ask(prompt_text, console=self.console)
         return user_input.strip()
+
+    def _display_tool_call(self, name: str, args: dict, result: str, failed: bool) -> None:
+        """实时显示工具调用详情。"""
+        key_args = {k: str(v)[:60] for k, v in args.items()}
+        icon = "🔧"
+        color = "red" if failed else "cyan"
+        self.console.print(f"  {icon} [bold {color}]{name}[/bold {color}] {key_args}")
+
+        result_preview = result[:200].replace("\n", " ")
+        if len(result) > 200:
+            result_preview += f" ...({len(result)} chars)"
+        if failed:
+            self.console.print(f"    [red]✗ {result_preview}[/red]")
+        else:
+            self.console.print(f"    [dim]  {result_preview}[/dim]")
 
     def display_agent_response(self, content: str) -> None:
         """显示 Agent 响应。"""
