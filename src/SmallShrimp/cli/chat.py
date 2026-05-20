@@ -48,6 +48,12 @@ class ChatLoop:
         )
         self.session = self.agent.new_session(source=CliEventSource())
 
+        # 注入 CLI 确认回调
+        from rich.prompt import Confirm
+        self.session.set_confirm_fn(
+            lambda msg: Confirm.ask(f"\n[bold yellow]⚠ {msg}[/bold yellow]", default=False)
+        )
+
         # 订阅 InboundEvent - 直接处理消息
         self.context.eventbus.subscribe(InboundEvent, self.handle_inbound_event)
 

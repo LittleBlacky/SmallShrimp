@@ -49,6 +49,10 @@ class Agent:
         self.failure_learner = FailureLearner(
             state_path=str(config.data.get("workspace", "workspace")) + "/.cache/failure_learning.json"
         )
+        # Permission mode
+        from ..core.permissions import PermissionMode
+        mode_str = agent_def.llm.get("permission_mode", "default")
+        self.permission_mode = PermissionMode(mode_str) if mode_str in PermissionMode.__members__ else PermissionMode.DEFAULT
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -104,10 +108,15 @@ class AgentSession:
         from ..core.tool_guardrails import ToolGuardrailController
         self._guardrail = ToolGuardrailController()
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
+        self._confirm_fn = None  # 外部确认回调（CLI/server 注入）
 
     @property
     def session_id(self) -> str:
         return self.state.session_id
+
+    def set_confirm_fn(self, fn):
+        """注入外部确认回调。fn(message) → True/False/None."""
+        self._confirm_fn = fn
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
@@ -225,6 +234,19 @@ class AgentSession:
 
         # 串行执行写工具
         for tc, name, args in writes:
+            # 权限检查
+            from ..core.permissions import check_permission
+            perm = check_permission(name, args, self.agent.permission_mode)
+            if perm.needs_confirmation and self._confirm_fn:
+                approved = self._confirm_fn(perm.message)
+                if approved is False:
+                    self.state.add_message(ToolMessage(
+                        content=f"Error: {name} denied by user.",
+                        tool_call_id=tc["id"],
+                        name=name,
+                    ))
+                    continue
+
             try:
                 result = await self.agent.tool_registry.execute_tool(name, **args)
                 failed = result.startswith("Error:")
