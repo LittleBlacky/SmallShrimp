@@ -1,20 +1,39 @@
+from __future__ import annotations
 from rich.console import Console
 import typer
 from pathlib import Path
+
+
+def _resolve_workspace() -> Path:
+    """Resolve workspace directory relative to project root, not CWD."""
+    # Walk up from this file: src/SmallShrimp/cli/main.py → project root
+    pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
+    ws = pkg_dir / "workspace"
+    if ws.exists():
+        return ws
+    # Fallback: try CWD
+    cwd_ws = Path.cwd() / "workspace"
+    if cwd_ws.exists():
+        return cwd_ws
+    # Last resort
+    return Path("workspace")
+
 
 app = typer.Typer(help="SmallShrimp - AI Agent")
 
 
 @app.command()
 def chat(
-    agent_id: str | None = typer.Option(None, "--agent", "-a", help="Agent ID to use")
+    agent_id: str | None = typer.Option(None, "--agent", "-a", help="Agent ID to use"),
+    workspace: Path = typer.Option(None, "--workspace", "-w", help="工作区路径"),
 ) -> None:
     """启动交互式聊天会话。"""
     from .chat import run_chat
     from ..utils.config import Config
 
-    config = Config.from_yaml(Path("workspace/config.user.yaml"))
-    config.workspace = Path("workspace")
+    ws = workspace or _resolve_workspace()
+    config = Config.from_yaml(ws / "config.user.yaml")
+    config.workspace = ws
     run_chat(config, agent_id=agent_id)
 
 

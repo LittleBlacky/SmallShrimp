@@ -181,6 +181,7 @@ class ChatLoop:
 
 def run_chat(config: Config, agent_id: str | None = None) -> None:
     """启动聊天会话。"""
-    context = Context.from_workspace(Path("workspace"))
+    workspace = getattr(config, 'workspace', Path("workspace"))
+    context = Context.from_workspace(Path(workspace))
     chat_loop = ChatLoop(context, agent_id=agent_id)
     asyncio.run(chat_loop.run())
