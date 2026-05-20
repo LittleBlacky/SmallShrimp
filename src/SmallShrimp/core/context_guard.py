@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+import os
 import time
 
 from litellm import token_counter
@@ -21,8 +22,12 @@ if TYPE_CHECKING:
 
 from .message import Message, ToolMessage, HumanMessage
 
-BUDGET_TIER1_CHARS = 30000  # 50-70% context full → 30KB per result
-BUDGET_TIER2_CHARS = 15000  # >70% full → 15KB per result
+BUDGET_TIER1_CHARS = 30000
+BUDGET_TIER2_CHARS = 15000
+PERSIST_THRESHOLD = 30 * 1024    # 30KB: larger results persisted to disk
+PERSIST_PREVIEW_LINES = 200       # lines to show in preview
+SNIP_THRESHOLD = 0.60             # snip when >60% context full
+KEEP_RECENT_RESULTS = 3           # keep last N tool results
 MICROCOMPACT_IDLE_SECONDS = 60
 
 COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
@@ -47,11 +52,12 @@ class ContextGuard:
         self,
         token_threshold: int = 160000,
         context_window: int = 200000,
+        offload_dir: str | None = None,
     ):
         self.token_threshold = token_threshold
         self.context_window = context_window
+        self.offload_dir = offload_dir or os.path.join(os.getcwd(), "workspace", ".cache", "tool_results")
         self._last_activity: float = time.time()
-        self._seen_files: dict[str, int] = {}  # file → last_seen_msg_index
 
     def _fill_ratio(self, tokens: int) -> float:
         return tokens / self.context_window
@@ -66,6 +72,32 @@ class ContextGuard:
             return state._estimate_tokens(
                 "".join(m.get("content", "") or "" for m in messages)
             )
+
+    # ── Persist ─────────────────────────────────────────────
+    def _persist_large_result(self, msg: ToolMessage) -> ToolMessage:
+        """>30KB 结果落盘，消息中保留 200 行预览 + 文件路径。"""
+        content = msg.content or ""
+        if len(content.encode("utf-8")) <= PERSIST_THRESHOLD:
+            return msg
+
+        os.makedirs(self.offload_dir, exist_ok=True)
+        filename = f"{msg.name or 'tool'}_{msg.tool_call_id or 'result'}.txt"
+        filepath = os.path.join(self.offload_dir, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        lines = content.split("\n")
+        size_kb = len(content.encode("utf-8")) / 1024
+        preview = "\n".join(lines[:PERSIST_PREVIEW_LINES])
+
+        hint = (
+            f"[Result too large ({size_kb:.1f} KB, {len(lines)} lines). "
+            f"Full output saved to {filepath}. "
+            f"You can use read to see the full result.]\n\n"
+            f"Preview (first {PERSIST_PREVIEW_LINES} lines):\n{preview}"
+        )
+        return ToolMessage(content=hint, tool_call_id=msg.tool_call_id, name=msg.name)
 
     # ── Budget ──────────────────────────────────────────────
     def _budget_truncate(self, messages: list["Message"]) -> list["Message"]:
@@ -96,6 +128,11 @@ class ContextGuard:
                 result.append(msg)
         return result
 
+    # ── Persist ─────────────────────────────────────────────
+    def _persist_large_results(self, messages: list["Message"]) -> list["Message"]:
+        """>30KB 结果落盘，替换为预览。"""
+        return [self._persist_large_result(m) if isinstance(m, ToolMessage) else m for m in messages]
+
     def estimate_tokens_raw(self, messages: list["Message"]) -> int:
         """估算原始消息列表的 token（不通过 state）。"""
         model = "gpt-4"
@@ -107,54 +144,50 @@ class ContextGuard:
 
     # ── Snip ────────────────────────────────────────────────
     def _snip_duplicates(self, messages: list["Message"]) -> list["Message"]:
-        """替换重复读取为占位符，保留最近一次。"""
-        # 追踪文件读取
-        file_reads: dict[str, int] = {}  # file → last_index
-        for i, msg in enumerate(messages):
-            if isinstance(msg, ToolMessage) and msg.name == "read":
-                content = msg.content or ""
-                # 提取文件名：content 以文件内容开头
-                file_reads[content[:80]] = i
+        """替换旧/重复工具结果为占位符，保留最近 N 个。"""
+        tokens = self.estimate_tokens_raw(messages)
+        if tokens / max(self.context_window, 1) < SNIP_THRESHOLD:
+            return messages
 
-        # 标记旧的重复读取
-        result: list[Message] = []
-        for i, msg in enumerate(messages):
-            if isinstance(msg, ToolMessage) and msg.name == "read":
-                content = msg.content or ""
-                key = content[:80]
-                last_idx = file_reads.get(key, i)
-                if i < last_idx:
-                    # 旧的读取，替换为占位符
-                    result.append(ToolMessage(
-                        content=f"[Content snipped: previously read, see result at index {last_idx}]",
-                        tool_call_id=msg.tool_call_id,
-                        name=msg.name,
-                    ))
-                    continue
-            result.append(msg)
+        # 收集所有 ToolMessage 索引
+        tool_indices = [i for i, m in enumerate(messages) if isinstance(m, ToolMessage)]
+        if len(tool_indices) <= KEEP_RECENT_RESULTS:
+            return messages
+
+        snip_before = len(tool_indices) - KEEP_RECENT_RESULTS
+        result = list(messages)
+        for idx in tool_indices[:snip_before]:
+            msg = result[idx]
+            result[idx] = ToolMessage(
+                content="[Content snipped - re-read if needed]",
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
         return result
 
     # ── Microcompact ────────────────────────────────────────
     def _microcompact(self, messages: list["Message"]) -> list["Message"]:
-        """删除旧工具结果，保留最后 N 个用户消息相关的内容。"""
-        # 找到最后几个用户消息的索引
-        user_indices = []
-        for i, msg in enumerate(messages):
-            if isinstance(msg, HumanMessage):
-                user_indices.append(i)
+        """不活跃时清理旧工具结果，替换为占位符（保留消息结构）。"""
+        # 收集所有 ToolMessage 索引（跳过已 snip/cleared 的）
+        SNIP_PLACEHOLDER = "[Content snipped - re-read if needed]"
+        CLEARED_PLACEHOLDER = "[Old result cleared]"
+        tool_indices = [
+            i for i, m in enumerate(messages)
+            if isinstance(m, ToolMessage)
+            and m.content not in (SNIP_PLACEHOLDER, CLEARED_PLACEHOLDER)
+        ]
+        if len(tool_indices) <= KEEP_RECENT_RESULTS:
+            return messages
 
-        if len(user_indices) < 3:
-            return messages  # 不够，不清理
-
-        # 保留最后 4 个用户消息之后的所有消息
-        cutoff = max(0, user_indices[-4] if len(user_indices) >= 4 else user_indices[0])
-
-        # 移除 cutoff 之前的 ToolMessage
-        result = []
-        for i, msg in enumerate(messages):
-            if i < cutoff and isinstance(msg, ToolMessage):
-                continue
-            result.append(msg)
+        clear_count = len(tool_indices) - KEEP_RECENT_RESULTS
+        result = list(messages)
+        for idx in tool_indices[:clear_count]:
+            msg = result[idx]
+            result[idx] = ToolMessage(
+                content=CLEARED_PLACEHOLDER,
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
         return result
 
     # ── Autocompact ─────────────────────────────────────────
@@ -206,18 +239,21 @@ class ContextGuard:
         """
         tokens = self.estimate_tokens(state)
 
-        # Budget — 始终运行，内部按 50%/70% 阈值决定是否截断
+        # Budget — 始终运行，内部按 50%/70% ratio 决定是否截断
         state.messages = self._budget_truncate(state.messages)
+
+        # Persist — >30KB 结果落盘 + 预览
+        state.messages = self._persist_large_results(state.messages)
 
         if tokens < self.token_threshold:
             return state
 
-        # Snip — 替换重复读取（>80% context）
+        # Snip — 替换旧工具结果为占位符（>60% context）
         state.messages = self._snip_duplicates(state.messages)
         if self.estimate_tokens(state) < self.token_threshold:
             return state
 
-        # Microcompact — 清理旧工具结果（无损：只删旧数据）
+        # Microcompact — 不活跃时清理旧结果（替换为占位符）
         now = time.time()
         if now - self._last_activity > MICROCOMPACT_IDLE_SECONDS:
             state.messages = self._microcompact(state.messages)

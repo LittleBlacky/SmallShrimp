@@ -40,6 +40,16 @@ def test_budget_truncate_large_results():
     assert len(truncated[1].content) < len(large_content)
 
 
+def test_snip_under_threshold_noop():
+    """Snip: 低于 60% 不触发。"""
+    from src.SmallShrimp.core.message import ToolMessage
+
+    guard = ContextGuard(context_window=100000)
+    messages = [ToolMessage(content="small", tool_call_id="c1", name="read")]
+    result = guard._snip_duplicates(messages)
+    assert result[0].content == "small"
+
+
 @pytest.mark.asyncio
 async def test_check_and_compact_under_threshold():
     """测试未超阈值时直接返回。"""
@@ -70,4 +80,5 @@ if __name__ == "__main__":
     test_context_guard_init()
     test_context_guard_default_threshold()
     test_budget_truncate_large_results()
+    test_snip_under_threshold_noop()
     print("\nAll test_context_guard tests passed!")
