@@ -111,6 +111,13 @@ class AgentSession:
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
+        # 检测用户纠正信号
+        from ..core.correction import detect_correction, render_correction_hint
+        correction = detect_correction(message)
+        if correction:
+            hint = render_correction_hint(correction)
+            message = f"{hint}\n\n---\n\n{message}"
+
         # 添加用户消息
         user_msg = HumanMessage(content=message)
         self.state.add_message(user_msg)
