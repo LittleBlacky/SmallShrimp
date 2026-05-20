@@ -2,24 +2,92 @@ from __future__ import annotations
 from rich.console import Console
 import typer
 from pathlib import Path
+import os
+
+
+def _default_workspace() -> Path:
+    """Find workspace: env var > ~/.smallshrimp > package dir."""
+    env_ws = os.environ.get("SMALLSHRIMP_WORKSPACE")
+    if env_ws:
+        return Path(env_ws)
+    if os.name == "nt":
+        home_ws = Path(os.environ.get("APPDATA", "~")) / "SmallShrimp"
+    else:
+        home_ws = Path.home() / ".smallshrimp"
+    if home_ws.exists():
+        return home_ws
+    pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
+    pkg_ws = pkg_dir / "workspace"
+    if pkg_ws.exists():
+        return pkg_ws
+    home_ws.mkdir(parents=True, exist_ok=True)
+    return home_ws
 
 
 def _resolve_workspace() -> Path:
-    """Resolve workspace directory relative to project root, not CWD."""
-    # Walk up from this file: src/SmallShrimp/cli/main.py → project root
-    pkg_dir = Path(__file__).resolve().parent.parent.parent.parent
-    ws = pkg_dir / "workspace"
-    if ws.exists():
-        return ws
-    # Fallback: try CWD
-    cwd_ws = Path.cwd() / "workspace"
-    if cwd_ws.exists():
-        return cwd_ws
-    # Last resort
-    return Path("workspace")
+    ws = _default_workspace()
+    ws.mkdir(parents=True, exist_ok=True)
+    return ws
 
 
 app = typer.Typer(help="SmallShrimp - AI Agent")
+
+
+@app.command()
+def init(
+    path: Path = typer.Option(None, "--path", "-p", help="工作区路径 (默认 ~/.smallshrimp)"),
+) -> None:
+    """初始化工作区，创建配置文件和目录结构。"""
+    ws = path or _default_workspace()
+    ws.mkdir(parents=True, exist_ok=True)
+
+    # 创建子目录
+    for d in ["agents", "skills", "sessions", "memories", "crons", ".cache"]:
+        (ws / d).mkdir(parents=True, exist_ok=True)
+
+    # 创建默认配置
+    config_file = ws / "config.user.yaml"
+    if not config_file.exists():
+        config_file.write_text("""\
+# SmallShrimp 用户配置
+default_provider: deepseek
+default_agent: pickle
+
+providers:
+  deepseek:
+    api_key: your-api-key-here
+    api_base: https://api.deepseek.com
+
+# 权限模式: default | acceptEdits | bypassPermissions | plan | dontAsk
+permission_mode: default
+""", encoding="utf-8")
+
+    # 创建默认 Agent
+    agent_dir = ws / "agents" / "pickle"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = agent_dir / "AGENT.md"
+    if not agent_file.exists():
+        agent_file.write_text("""\
+---
+name: Pickle
+description: 默认助手
+llm:
+  provider: deepseek
+  model: deepseek/deepseek-chat
+  temperature: 0.7
+  context_window: 200000
+---
+
+# Pickle
+
+你是一个友好的 AI 助手。用中文回复。
+""", encoding="utf-8")
+
+    console = Console()
+    console.print(f"\n[green]✓ 工作区已初始化: {ws}[/green]")
+    console.print(f"  配置文件: {config_file}")
+    console.print(f"  默认 Agent: {agent_dir}")
+    console.print(f"\n  [dim]设置 API key 后运行 smallshrimp chat 开始[/dim]\n")
 
 
 @app.command()
