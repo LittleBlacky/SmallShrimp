@@ -2,10 +2,14 @@
 from pathlib import Path
 from ..tools.decorators import tool
 
+READ_DEFAULT_LIMIT = 500   # read 默认行数上限，防单次结果过大
+GREP_DEFAULT_LIMIT = 200   # grep 默认匹配数上限
+GLOB_DEFAULT_LIMIT = 500   # glob 默认文件数上限
 
-@tool(name="read", description="Read a file. offset/limit are line numbers. With no params returns whole file.")
-async def read(path: str, offset: int = 0, limit: int | None = None) -> str:
-    """读取文件内容。offset 起始行，limit 最大行数。"""
+
+@tool(name="read", description="Read a file. offset/limit in lines. Default limit=500, set limit=0 for full file.")
+async def read(path: str, offset: int = 0, limit: int = READ_DEFAULT_LIMIT) -> str:
+    """读取文件内容。默认返回前 500 行，传 limit=0 获取完整文件。"""
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {path}")
@@ -15,12 +19,11 @@ async def read(path: str, offset: int = 0, limit: int | None = None) -> str:
     total = len(lines)
     if offset:
         lines = lines[offset:]
-    if limit:
+    if limit and limit > 0:
         lines = lines[:limit]
     result = "\n".join(lines)
-    if offset or limit:
-        return f"[Lines {offset}-{offset + len(lines) - 1} of {total}]\n{result}"
-    return f"[Lines 0-{total - 1} of {total}]\n{result}"
+    end_line = offset + len(lines) - 1
+    return f"[Lines {offset}-{end_line} of {total}]\n{result}"
 
 @tool(name="write", description="Write content to a file. Creates or overwrites the file.")
 async def write(path: str, content: str) -> str:

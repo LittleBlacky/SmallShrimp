@@ -41,9 +41,25 @@ def test_fill_ratio():
     assert guard._fill_ratio(100000) == 0.5
 
 
+def test_budget_truncate_head_tail():
+    """Budget 截断：头尾保留，中间省略。"""
+    guard = ContextGuard(context_window=10000)
+    head = "HEAD_" + "A" * 5000
+    tail = "TAIL_" + "Z" * 5000
+    content = head + "M" * 20000 + tail
+    msg = ToolMessage(content=content, tool_call_id="c1", name="read")
+    result = guard._budget_truncate([msg])
+    assert "budgeted" in result[0].content
+    assert "HEAD_" in result[0].content
+    assert "TAIL_" in result[0].content
+    # 截断后比原内容短
+    assert len(result[0].content) < len(content)
+
+
 if __name__ == "__main__":
     test_snip_duplicates_replaces_duplicate_reads()
     test_snip_duplicates_preserves_unique_reads()
     test_microcompact_keeps_recent()
     test_fill_ratio()
+    test_budget_truncate_head_tail()
     print("All multi-stage compaction tests passed!")

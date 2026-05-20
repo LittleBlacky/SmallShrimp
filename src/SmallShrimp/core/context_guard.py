@@ -3,10 +3,11 @@ from __future__ import annotations
 
 """Context guard for proactive context window management.
 
-3-tier compaction (zero-cost first):
-  Tier 1 (Snip):       Replace stale/duplicate reads with placeholders
-  Tier 2 (Microcompact): Drop old tool results after inactivity
-  Tier 3 (Autocompact): LLM summary (API call)
+4-tier compaction (aligned with claude-code-from-scratch, zero-cost first):
+  Tier 1 (Budget):     Head+tail truncation of large tool results
+  Tier 2 (Snip):       Replace stale/duplicate reads with placeholders
+  Tier 3 (Microcompact): Drop old tool results after inactivity
+  Tier 4 (Autocompact): LLM summary (API call)
 """
 
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 
 from .message import Message, ToolMessage, HumanMessage
 
+BUDGET_TIER1_CHARS = 30000  # 50-70% context full → 30KB per result
+BUDGET_TIER2_CHARS = 15000  # >70% full → 15KB per result
 MICROCOMPACT_IDLE_SECONDS = 60
 
 COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
@@ -63,6 +66,44 @@ class ContextGuard:
             return state._estimate_tokens(
                 "".join(m.get("content", "") or "" for m in messages)
             )
+
+    # ── Budget ──────────────────────────────────────────────
+    def _budget_truncate(self, messages: list["Message"]) -> list["Message"]:
+        """头尾截断大工具结果。LLM 可重跑工具获取完整结果，非信息丢失。"""
+        tokens = self.estimate_tokens_raw(messages)
+        ratio = tokens / max(self.context_window, 1)
+        if ratio < 0.5:
+            return messages
+        budget = BUDGET_TIER2_CHARS if ratio > 0.7 else BUDGET_TIER1_CHARS
+
+        result: list[Message] = []
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and msg.content and len(msg.content) > budget:
+                keep_each = (budget - 80) // 2
+                if keep_each <= 0:
+                    keep_each = budget // 2
+                truncated = (
+                    msg.content[:keep_each]
+                    + f"\n\n[...budgeted: {len(msg.content) - keep_each * 2} chars truncated, re-run tool for full result...]\n\n"
+                    + msg.content[-keep_each:]
+                )
+                result.append(ToolMessage(
+                    content=truncated,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                ))
+            else:
+                result.append(msg)
+        return result
+
+    def estimate_tokens_raw(self, messages: list["Message"]) -> int:
+        """估算原始消息列表的 token（不通过 state）。"""
+        model = "gpt-4"
+        try:
+            dict_msgs = [msg.to_dict() if hasattr(msg, 'to_dict') else msg for msg in messages]
+            return token_counter(model=model, messages=dict_msgs)
+        except Exception:
+            return sum(len(getattr(m, 'content', '') or '') // 4 for m in messages)
 
     # ── Snip ────────────────────────────────────────────────
     def _snip_duplicates(self, messages: list["Message"]) -> list["Message"]:
@@ -160,10 +201,15 @@ class ContextGuard:
 
     # ── Main check ────────────────────────────────────────────
     async def check_and_compact(self, state: "SessionState") -> "SessionState":
-        """3 阶段压缩：Snip 去重 → Microcompact 清旧 → Autocompact 总结。"""
+        """4 阶段压缩：Budget → Snip → Microcompact → Autocompact。"""
         tokens = self.estimate_tokens(state)
 
         if tokens < self.token_threshold:
+            return state
+
+        # Budget — 头尾截断大工具结果
+        state.messages = self._budget_truncate(state.messages)
+        if self.estimate_tokens(state) < self.token_threshold:
             return state
 
         # Snip — 替换重复读取

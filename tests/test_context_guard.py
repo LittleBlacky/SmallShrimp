@@ -21,6 +21,25 @@ def test_context_guard_default_threshold():
     assert guard.token_threshold == 160000  # 80% of 200k
 
 
+def test_budget_truncate_large_results():
+    """测试 Budget 截断大工具结果（Tier 1）。"""
+    from src.SmallShrimp.core.message import HumanMessage, ToolMessage
+
+    guard = ContextGuard(context_window=10000)
+
+    large_content = "x" * 50000
+    messages = [
+        HumanMessage(content="Hello"),
+        ToolMessage(content=large_content, tool_call_id="call1", name="test"),
+    ]
+
+    truncated = guard._budget_truncate(messages)
+    assert len(truncated) == 2
+    assert truncated[0].content == "Hello"
+    assert "budgeted" in truncated[1].content
+    assert len(truncated[1].content) < len(large_content)
+
+
 @pytest.mark.asyncio
 async def test_check_and_compact_under_threshold():
     """测试未超阈值时直接返回。"""
@@ -50,4 +69,5 @@ async def test_check_and_compact_under_threshold():
 if __name__ == "__main__":
     test_context_guard_init()
     test_context_guard_default_threshold()
+    test_budget_truncate_large_results()
     print("\nAll test_context_guard tests passed!")
