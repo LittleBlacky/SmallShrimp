@@ -1,4 +1,4 @@
-"""Shell execution tool — with Layer 4 Bash AST guard."""
+"""Shell execution tool — with Layer 4 tree-sitter Bash AST guard."""
 from __future__ import annotations
 
 import subprocess

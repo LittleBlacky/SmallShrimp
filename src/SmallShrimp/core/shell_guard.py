@@ -1,101 +1,60 @@
-"""Shell command guard — Layer 4 defense: Bash AST / pattern analysis.
+"""Shell command guard — Layer 4: tree-sitter Bash AST analysis.
 
-Parses shell commands to detect dangerous patterns. Uses enhanced regex
-matching (tree-sitter would be ideal but adds a heavy dependency).
+Parses shell commands into a Concrete Syntax Tree using tree-sitter,
+then walks the AST to detect dangerous patterns with quote awareness.
 
-23 safety checks covering:
-  - Destructive file ops (rm, dd, mkfs)
-  - Privilege escalation (sudo, su)
-  - System control (reboot, shutdown, kill)
-  - Data exfiltration (curl/wget pipe, /dev/tcp)
-  - Git destructive (push --force, hard reset, clean -f)
-  - Windows destructive (del, rmdir, format, Remove-Item)
-  - Dangerous pipes and redirects
-  - Command chaining with destructive ops
+Key advantage: understands shell grammar — "echo 'rm -rf /'" is safe
+(rm is inside a quoted string), while regex-based approaches would
+false-positive.
 """
 from __future__ import annotations
 
-import re
-import shlex
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any
+
+import tree_sitter_bash as tsb
+from tree_sitter import Language, Parser
+
+_parser: Parser | None = None
 
 
-# ── Dangerous patterns (aligned with claude-code-from-scratch) ──
-
-_DANGEROUS_PATTERNS: list[tuple[str, str]] = [
-    # Destructive filesystem
-    (r"\brm\s+-rf\b", "rm -rf (recursive delete)"),
-    (r"\brm\s+-r\b", "rm -r (recursive delete)"),
-    (r"\brm\b", "rm (delete files) — use with caution"),
-    (r"\bdd\s+if=", "dd (disk copy)"),
-    (r"\bmkfs\.", "mkfs (format filesystem)"),
-    (r">\s*/dev/sd", "write to block device"),
-    # Privilege escalation
-    (r"\bsudo\b", "sudo (privilege escalation)"),
-    (r"\bsu\s+-", "su (switch user)"),
-    (r"\bchmod\s+777\b", "chmod 777 (world-writable)"),
-    (r"\bchmod\s\+s\b", "chmod +s (setuid)"),
-    # System control
-    (r"\breboot\b", "reboot"),
-    (r"\bshutdown\b", "shutdown"),
-    (r"\bkill\s+-9\b", "kill -9 (force kill)"),
-    (r"\bpkill\b", "pkill"),
-    (r"\bkillall\b", "killall"),
-    # Data exfiltration
-    (r"\bcurl\b.*\|.*\bbash\b", "curl pipe to bash"),
-    (r"\bwget\b.*\|.*\bbash\b", "wget pipe to bash"),
-    (r">\s*/dev/tcp/", "write to /dev/tcp"),
-    (r"\bnc\s+-e\b", "netcat -e (backdoor)"),
-    # Git destructive
-    (r"\bgit\s+push\s+.*--force", "git push --force"),
-    (r"\bgit\s+reset\s+--hard\b", "git reset --hard"),
-    (r"\bgit\s+clean\s+-f[d-x]*\b", "git clean -f"),
-    # Windows destructive
-    (r"\bdel\s+/[fq]", "del /f (Windows force delete)"),
-    (r"\brmdir\s+/s\b", "rmdir /s (Windows recursive)"),
-    (r"\bformat\s+[a-z]:", "format drive (Windows)"),
-    (r"\bRemove-Item\s+-Recurse", "Remove-Item -Recurse (PowerShell)"),
-    # Command chaining abuse
-    (r"\brm\b.*&&.*\brm\b", "chained rm commands"),
-    (r"\beval\s", "eval (code injection risk)"),
-]
-
-_COMPILED_DANGEROUS = [(re.compile(p, re.IGNORECASE), desc) for p, desc in _DANGEROUS_PATTERNS]
-
-# ── Parsed command ──────────────────────────────────────────
-
-@dataclass
-class ParsedCommand:
-    raw: str
-    program: str = ""
-    args: list[str] = field(default_factory=list)
-    has_pipe: bool = False
-    has_redirect: bool = False
-    has_backtick: bool = False
-    has_dollar_sub: bool = False
-
-    @classmethod
-    def parse(cls, command: str) -> "ParsedCommand":
-        pc = cls(raw=command)
-        pc.has_pipe = "|" in command
-        pc.has_redirect = ">" in command or ">>" in command
-        pc.has_backtick = "`" in command
-        pc.has_dollar_sub = "$(" in command
-
-        # Parse first word as program
-        try:
-            tokens = shlex.split(command)
-            if tokens:
-                pc.program = tokens[0]
-                pc.args = tokens[1:]
-        except ValueError:
-            pc.program = command.split()[0] if command.split() else ""
-
-        return pc
+def _get_parser() -> Parser:
+    global _parser
+    if _parser is None:
+        lang = Language(tsb.language())
+        _parser = Parser(lang)
+    return _parser
 
 
-# ── Checker ─────────────────────────────────────────────────
+def parse_command(command: str) -> Any:
+    try:
+        tree = _get_parser().parse(command.encode())
+        return tree.root_node
+    except Exception:
+        return None
+
+
+# ── Node types ─────────────────────────────────────────────
+
+_DANGEROUS_REDIRECT_TARGETS = {
+    "/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd",
+}
+
+_BLOCKED_PROGRAMS = {
+    "sudo", "su", "reboot", "shutdown", "mkfs", "dd",
+    "format", "taskkill",
+}
+
+_WARN_PROGRAMS = {
+    "rm", "kill", "pkill", "killall", "chmod", "chown",
+    "nc", "ncat", "del", "rmdir",
+    "curl", "wget",
+}
+
+_DESTRUCTIVE_FLAGS = {
+    "-rf", "-r", "-f", "--force", "--hard", "-9", "-Recurse",
+}
+
 
 @dataclass
 class ShellCheckResult:
@@ -108,60 +67,86 @@ class ShellCheckResult:
         return len(self.blocked) > 0
 
 
+# ── AST walker ────────────────────────────────────────────
+
 def check_shell_command(command: str) -> ShellCheckResult:
-    """Analyze a shell command for dangerous patterns. Returns structured result."""
     result = ShellCheckResult()
-    parsed = ParsedCommand.parse(command)
-
-    # Check command level (most reliable)
-    if parsed.program:
-        prog_result = _check_program(parsed.program)
-        if not prog_result.safe:
-            result.blocked.extend(prog_result.warnings)
-
-    # Check full command for dangerous patterns
-    for pattern, desc in _COMPILED_DANGEROUS:
-        if pattern.search(command):
-            if _is_critical(desc):
-                result.blocked.append(desc)
-            else:
-                result.warnings.append(desc)
-
-    # Structural checks
-    if parsed.has_backtick:
-        result.warnings.append("backtick command substitution")
-    if parsed.has_dollar_sub:
-        result.warnings.append("$(...) command substitution")
-    if parsed.has_pipe and any(destructive in command for destructive in ["rm", "kill", "sudo"]):
-        result.warnings.append("pipe with destructive command")
-
-    # Determine safety
+    root = parse_command(command)
+    if root is None:
+        result.blocked.append("failed to parse command")
+        result.safe = False
+        return result
+    _walk_node(root, command, result)
     if result.blocked:
         result.safe = False
-
     return result
 
 
-def _check_program(program: str) -> ShellCheckResult:
-    """Check if the program itself is dangerous."""
-    DANGEROUS_PROGRAMS = {
-        "dd", "mkfs", "sudo", "su", "reboot", "shutdown",
-        "pkill", "killall", "chmod", "chown",
-        "nc", "ncat", "eval", "exec",
-        "format", "del", "rmdir", "taskkill",
-    }
-    program_lower = program.lower()
-    if program_lower in DANGEROUS_PROGRAMS:
-        return ShellCheckResult(safe=False, warnings=[f"dangerous program: {program}"])
-    return ShellCheckResult(safe=True)
+def _walk_node(node: Any, source: str, result: ShellCheckResult, depth: int = 0) -> None:
+    node_type = node.type
+
+    # Redirect targets
+    if node_type == "file_redirect":
+        target_text = source[node.start_byte:node.end_byte]
+        for target in _DANGEROUS_REDIRECT_TARGETS:
+            if target in target_text:
+                result.blocked.append(f"redirect to {target}")
+
+    # Pipeline: curl/wget → shell
+    if node_type == "pipeline":
+        cmd_text = source[node.start_byte:node.end_byte]
+        has_dl = any(c in cmd_text for c in ("curl", "wget"))
+        has_sh = any(c in cmd_text for c in ("bash", "sh", "zsh"))
+        if has_dl and has_sh:
+            if not _is_quoted_pipeline(node, source):
+                result.blocked.append("dangerous pipe: curl/wget → shell")
+
+    # Command
+    if node_type == "command":
+        _check_command_node(node, source, result)
+
+    # Subshell
+    if node_type == "command_substitution":
+        sub_text = source[node.start_byte:node.end_byte]
+        result.warnings.append(f"command substitution: {sub_text[:60]}")
+
+    for child in node.children:
+        _walk_node(child, source, result, depth + 1)
 
 
-def _is_critical(desc: str) -> bool:
-    """Determine if a pattern is critical (block) vs warning."""
-    CRITICAL = {
-        "rm -rf", "dd (disk copy)", "mkfs (format filesystem)",
-        "sudo (privilege escalation)", "reboot", "shutdown",
-        "curl pipe to bash", "wget pipe to bash",
-        "write to block device", "format drive (Windows)",
-    }
-    return any(c in desc for c in CRITICAL)
+def _check_command_node(node: Any, source: str, result: ShellCheckResult) -> None:
+    cmd_name = ""
+    flags: list[str] = []
+
+    for child in node.children:
+        if child.type == "command_name":
+            cmd_name = source[child.start_byte:child.end_byte].strip()
+        elif child.type in ("word", "number", "string") and not cmd_name:
+            cmd_name = source[child.start_byte:child.end_byte].strip()
+        elif child.type in ("word", "number", "string") and cmd_name:
+            text = source[child.start_byte:child.end_byte].strip()
+            if text.startswith("-"):
+                flags.append(text)
+
+    if not cmd_name:
+        return
+
+    cmd_lower = cmd_name.lower()
+
+    if cmd_lower in _BLOCKED_PROGRAMS or any(p in cmd_lower for p in _BLOCKED_PROGRAMS):
+        result.blocked.append(f"blocked: {cmd_name}")
+        return
+
+    if cmd_lower in _WARN_PROGRAMS:
+        has_destructive = any(f in _DESTRUCTIVE_FLAGS for f in flags)
+        if has_destructive:
+            result.blocked.append(f"{cmd_name} with destructive: {', '.join(flags)}")
+        else:
+            result.warnings.append(f"{cmd_name}: use with caution")
+
+
+def _is_quoted_pipeline(node: Any, source: str) -> bool:
+    """Check if pipeline content is entirely quoted."""
+    text = source[node.start_byte:node.end_byte].strip()
+    return (text.startswith('"') and text.endswith('"')) or \
+           (text.startswith("'") and text.endswith("'"))
