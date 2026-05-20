@@ -9,10 +9,12 @@ def create_tool_registry(config: dict) -> ToolRegistry:
 
     # 内置工具（零配置）
     from .builtin_tools import read, write, glob, grep
+    from .shell_tool import shell
     registry.register(read)
     registry.register(write)
     registry.register(glob)
     registry.register(grep)
+    registry.register(shell)
 
     # Skill 工具
     skills_dir = config.get("skills_dir", "workspace/skills")

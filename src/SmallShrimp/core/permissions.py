@@ -168,6 +168,18 @@ class PermissionChecker:
             if err:
                 return PermissionResult(action="deny", message=err)
 
+        # ── Layer 4: Shell command guard ──
+        if tool_name == "shell":
+            from ..core.shell_guard import check_shell_command
+            cmd = args.get("command", "")
+            if cmd:
+                check = check_shell_command(cmd)
+                if check.is_blocked:
+                    return PermissionResult(
+                        action="deny",
+                        message=f"Blocked: {', '.join(check.blocked)}",
+                    )
+
         # ── Layer 3: Deny rules (override everything including bypass) ──
         for rule in self.rules.deny:
             if rule.matches(tool_name, path):
