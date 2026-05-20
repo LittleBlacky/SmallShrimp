@@ -44,6 +44,11 @@ class Agent:
         token_threshold = int(context_window * 0.8)
         from ..core.context_guard import ContextGuard
         self.context_guard = ContextGuard(token_threshold=token_threshold) if context_guard is None else context_guard
+        # Failure learner — 跨轮次记住失败模式
+        from ..core.failure_learning import FailureLearner
+        self.failure_learner = FailureLearner(
+            state_path=str(config.data.get("workspace", "workspace")) + "/.cache/failure_learning.json"
+        )
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -98,6 +103,7 @@ class AgentSession:
     def __post_init__(self):
         from ..core.tool_guardrails import ToolGuardrailController
         self._guardrail = ToolGuardrailController()
+        self._turn_failures: list[dict] = []  # 本轮失败的工具调用
 
     @property
     def session_id(self) -> str:
@@ -111,6 +117,7 @@ class AgentSession:
 
         # 重置本轮 guardrail 计数器
         self._guardrail.reset()
+        self._turn_failures.clear()
 
         # 循环：直到 LLM 返回普通回复
         while True:
@@ -162,6 +169,12 @@ class AgentSession:
 
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
+
+            # 跨轮次失败学习
+            notes = self.agent.failure_learner.observe_turn(self._turn_failures)
+            for note in notes:
+                from ..core.message import SystemMessage
+                self.state.add_message(SystemMessage(content=note))
 
             if self.agent.history_manager:
                 self.agent.history_manager.save(self.session_id, self.state.messages)
@@ -220,6 +233,10 @@ class AgentSession:
 
         if decision.is_warning:
             result = append_guardrail_warning(result, decision)
+
+        # 记录失败用于跨轮次学习
+        if failed:
+            self._turn_failures.append({"tool_name": name, "error": result})
 
         self.state.add_message(ToolMessage(
             content=result,
