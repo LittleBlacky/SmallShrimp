@@ -201,18 +201,18 @@ class ContextGuard:
 
     # ── Main check ────────────────────────────────────────────
     async def check_and_compact(self, state: "SessionState") -> "SessionState":
-        """4 阶段压缩：Budget → Snip → Microcompact → Autocompact。"""
+        """4 阶段压缩：Budget → Snip → Microcompact → Autocompact。
+        Budget 始终运行（内部按 ratio 判断），后续三层仅在超阈值时触发。
+        """
         tokens = self.estimate_tokens(state)
+
+        # Budget — 始终运行，内部按 50%/70% 阈值决定是否截断
+        state.messages = self._budget_truncate(state.messages)
 
         if tokens < self.token_threshold:
             return state
 
-        # Budget — 头尾截断大工具结果
-        state.messages = self._budget_truncate(state.messages)
-        if self.estimate_tokens(state) < self.token_threshold:
-            return state
-
-        # Snip — 替换重复读取
+        # Snip — 替换重复读取（>80% context）
         state.messages = self._snip_duplicates(state.messages)
         if self.estimate_tokens(state) < self.token_threshold:
             return state
