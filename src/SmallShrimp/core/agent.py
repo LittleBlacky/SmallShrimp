@@ -60,6 +60,13 @@ class Agent:
         self.trust_manager = TrustManager(
             state_path=str(config.data.get("workspace", "workspace")) + "/.cache/trust.json"
         )
+        # MCP manager
+        from ..core.mcp import McpManager
+        self.mcp_manager = McpManager()
+        mcp_servers = config.data.get("mcp_servers", {})
+        if mcp_servers:
+            self.mcp_manager.configure(mcp_servers)
+        self._mcp_registered = False
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -138,6 +145,12 @@ class AgentSession:
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
+        # MCP 懒初始化（首次 chat 时连接）
+        if not self.agent._mcp_registered:
+            self.agent._mcp_registered = True
+            from ..core.mcp import register_mcp_tools
+            await register_mcp_tools(self.agent.mcp_manager, self.agent.tool_registry)
+
         # 检测用户纠正信号（关键词 + 结构分析）
         from ..core.correction import detect_correction_combined, render_correction_hint
         # 获取上一条 assistant 消息内容作为结构分析上下文
@@ -253,7 +266,10 @@ class AgentSession:
             name = tc["function"]["name"]
             args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
             entry = (tc, name, args)
-            if name in READONLY_TOOLS:
+            # MCP tools: route to MCP manager
+            if name.startswith("mcp__"):
+                writes.append(entry)
+            elif name in READONLY_TOOLS:
                 reads.append(entry)
             else:
                 writes.append(entry)
@@ -272,6 +288,17 @@ class AgentSession:
 
         # 串行执行写工具
         for tc, name, args in writes:
+            # MCP tool routing
+            if name.startswith("mcp__"):
+                try:
+                    result = await self.agent.mcp_manager.call_tool(name, args)
+                    failed = False
+                except Exception as e:
+                    result = f"Error: {e}"
+                    failed = True
+                self._check_guardrail_and_add(name, args, result, failed, tc)
+                continue
+
             # 权限检查
             perm = self.agent.permission_checker.check(name, args)
             if perm.needs_confirmation:
