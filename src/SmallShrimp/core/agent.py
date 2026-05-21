@@ -60,16 +60,21 @@ class Agent:
         self.trust_manager = TrustManager(
             state_path=str(config.data.get("workspace", "workspace")) + "/.cache/trust.json"
         )
-        # MCP manager
+        # MCP manager（自注册热重载）
         from ..core.mcp import McpManager
-        self.mcp_manager = McpManager()
-        mcp_servers = config.data.get("mcp_servers", {})
-        if mcp_servers:
-            self.mcp_manager.configure(mcp_servers)
+        self.mcp_manager = McpManager(config=config, tool_registry=self.tool_registry)
         self._mcp_registered = False
-        # 配置热更新时重载 MCP
-        from ..core.mcp import bind_mcp_hotreload
-        bind_mcp_hotreload(self, config)
+
+        # Agent 自身热重载：LLM + Permission
+        config.on_change(lambda data: self._on_config_reload(data))
+
+    def _on_config_reload(self, new_data: dict):
+        """配置热重载：重建 LLM 和权限。"""
+        self.llm = self._create_llm()
+        mode_str = new_data.get("permission_mode") or self.agent_def.llm.get("permission_mode", "default")
+        from ..core.permissions import PermissionMode
+        if mode_str in PermissionMode.__members__:
+            self.permission_checker.mode = PermissionMode(mode_str)
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig

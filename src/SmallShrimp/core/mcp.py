@@ -33,15 +33,27 @@ class McpToolInfo:
 
 class McpManager:
 
-    def __init__(self):
+    def __init__(self, config=None, tool_registry=None):
         self._servers: dict[str, dict] = {}
         self._sessions: dict[str, ClientSession] = {}
         self._transports: dict[str, tuple] = {}
         self._tools: list[McpToolInfo] = []
         self._initialized = False
+        self._tool_registry = tool_registry
 
-    def configure(self, servers: dict[str, dict]) -> None:
-        self._servers = servers
+        # 自注册配置热重载
+        if config:
+            mcp_servers = config.data.get("mcp_servers", {})
+            if mcp_servers:
+                self.configure(mcp_servers)
+            config.on_change(lambda data: self._on_config_reload(data))
+
+    def _on_config_reload(self, data: dict):
+        import asyncio
+        asyncio.create_task(reconfigure_mcp(self, self._tool_registry, data))
+
+    def set_registry(self, tool_registry) -> None:
+        self._tool_registry = tool_registry
 
     async def connect_all(self) -> None:
         if self._initialized:
