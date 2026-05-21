@@ -165,5 +165,20 @@ async def register_mcp_tools(mcp_manager: McpManager, tool_registry) -> None:
         tool_registry.register(
             make_mcp_tool(mcp_manager, mcp_def["name"], mcp_def["name"], mcp_def)
         )
-        self._sessions.clear()
-        self._transports.clear()
+
+
+async def reconfigure_mcp(mcp_manager: McpManager, tool_registry, config_data: dict) -> None:
+    """热重载 MCP：关闭旧连接，用新配置重连。"""
+    await mcp_manager.close_all()
+    mcp_manager._tools.clear()
+    mcp_manager._connections.clear()
+    mcp_manager._initialized = False
+
+    mcp_servers = config_data.get("mcp_servers", {})
+    if mcp_servers:
+        mcp_manager.configure(mcp_servers)
+        await mcp_manager.connect_all()
+        for mcp_def in mcp_manager.get_tool_definitions():
+            tool_registry.register(
+                make_mcp_tool(mcp_manager, mcp_def["name"], mcp_def["name"], mcp_def)
+            )

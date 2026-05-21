@@ -67,6 +67,9 @@ class Agent:
         if mcp_servers:
             self.mcp_manager.configure(mcp_servers)
         self._mcp_registered = False
+        # 配置热更新时重载 MCP
+        from ..core.mcp import bind_mcp_hotreload
+        bind_mcp_hotreload(self, config)
 
     def _create_llm(self) -> "LLMProvider":
         from ..provider.llm.base import LLMProvider, LLMConfig
@@ -266,10 +269,7 @@ class AgentSession:
             name = tc["function"]["name"]
             args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
             entry = (tc, name, args)
-            # MCP tools: route to MCP manager
-            if name.startswith("mcp__"):
-                writes.append(entry)
-            elif name in READONLY_TOOLS:
+            if name in READONLY_TOOLS:
                 reads.append(entry)
             else:
                 writes.append(entry)
@@ -288,17 +288,6 @@ class AgentSession:
 
         # 串行执行写工具
         for tc, name, args in writes:
-            # MCP tool routing
-            if name.startswith("mcp__"):
-                try:
-                    result = await self.agent.mcp_manager.call_tool(name, args)
-                    failed = False
-                except Exception as e:
-                    result = f"Error: {e}"
-                    failed = True
-                self._check_guardrail_and_add(name, args, result, failed, tc)
-                continue
-
             # 权限检查
             perm = self.agent.permission_checker.check(name, args)
             if perm.needs_confirmation:
