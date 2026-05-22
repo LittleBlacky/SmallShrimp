@@ -25,9 +25,11 @@ class Agent:
         history_manager: "HistoryManager",
         prompt_builder: "PromptBuilder | None" = None,
         context_guard: "ContextGuard | None" = None,
+        memory_manager: "Any | None" = None,
     ) -> None:
         self.agent_def = agent_def
         self.config = config
+        self.memory_manager = memory_manager
         self.llm: "LLMProvider" = self._create_llm()
         self.history_manager = history_manager
         self.prompt_builder = prompt_builder
