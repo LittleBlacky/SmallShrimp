@@ -25,11 +25,11 @@ def create_memory_tools(memory_manager):
 
     tools.append(remember)
 
-    @tool(description="保存重要的用户画像。用于记住用户的名字、身份、或需要始终关注的偏好。pinned 记忆会在每次对话中自动可见。")
-    async def remember_pinned(content: str) -> str:
-        record = memory_manager.remember(content, pinned=True)
-        return f"已记住 [📌]: {record['content']}"
+    @tool(description="保存用户画像。用于记住用户的名字、身份、或需要始终关注的偏好。画像会在每次对话中自动可见。")
+    async def remember_profile(content: str) -> str:
+        record = memory_manager.remember_profile(content)
+        return f"已记住 [画像]: {record['content']}"
 
-    tools.append(remember_pinned)
+    tools.append(remember_profile)
 
     return tools

@@ -96,9 +96,11 @@ async def cmd_remember(context: CommandContext, args: list[str]) -> str:
     pinned = "#pinned" in content
     content_clean = re.sub(r"#pinned", "", content).strip()
 
-    record = context.memory.remember(content_clean, pinned=pinned)
-    pin_str = " 📌" if pinned else ""
-    return f"✓ 已记住: {record['content'][:100]}{pin_str}"
+    if pinned:
+        record = context.memory.remember_profile(content_clean)
+        return f"✓ 已记住 [画像]: {record['content'][:100]}"
+    record = context.memory.remember(content_clean)
+    return f"✓ 已记住: {record['content'][:100]}"
 
 @register_command(name="recall", description="搜索记忆", usage="/recall <query>")
 async def cmd_recall(context: CommandContext, args: list[str]) -> str:
@@ -111,8 +113,7 @@ async def cmd_recall(context: CommandContext, args: list[str]) -> str:
         return f"没有找到关于 '{query}' 的记忆"
     lines = [f"找到 {len(results)} 条相关记忆:\n"]
     for r in results:
-        pin_str = " 📌" if r.get("pinned") else ""
-        lines.append(f"  • {r['content'][:80]}...{pin_str}")
+        lines.append(f"  • {r['content'][:80]}...")
     return "\n".join(lines)
 
 @register_command(name="memories", description="查看所有记忆", usage="/memories")
@@ -123,9 +124,8 @@ async def cmd_memories(context: CommandContext, args: list[str]) -> str:
         return "还没有任何记忆。使用 /remember <内容> 来添加。"
     lines = [f"共 {len(records)} 条记忆:\n"]
     for r in records:
-        pin_str = " 📌" if r.get("pinned") else ""
         date_str = r["created_at"][:10]
-        lines.append(f"  [{date_str}] {r['content'][:60]}...{pin_str}")
+        lines.append(f"  [{date_str}] {r['content'][:60]}...")
     return "\n".join(lines)
 
 @register_command(name="forget", description="删除记忆", usage="/forget <关键词>")

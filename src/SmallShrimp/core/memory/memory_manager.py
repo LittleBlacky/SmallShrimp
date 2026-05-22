@@ -15,16 +15,68 @@ class MemoryRecord(TypedDict, total=False):
     """记忆记录结构。"""
     id: str
     content: str
-    pinned: bool
     recall_count: int
     created_at: str
     updated_at: str
 
 
-class TopicMemory:
-    """主题记忆 - 长期存储的事实和偏好。"""
+class ProfileMemory:
+    """用户画像 - 身份、长期偏好，进 system prompt，不检索不淘汰。"""
 
-    def __init__(self, memory_dir: Path, max_entries: int = 100):
+    def __init__(self, memory_dir: Path):
+        self.file_path = memory_dir / "profile" / "profile.jsonl"
+        self.memory_dir = memory_dir / "profile"
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+
+    def _load_all(self) -> list[dict]:
+        if not self.file_path.exists():
+            return []
+        records = []
+        with open(self.file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+        return records
+
+    def _save_all(self, records: list[dict]) -> None:
+        with open(self.file_path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def store(self, content: str) -> dict:
+        records = self._load_all()
+        # 去重：内容完全相同则跳过
+        for existing in records:
+            if existing.get("content", "").strip() == content.strip():
+                return existing
+        record = {
+            "id": datetime.now().strftime("%Y%m%d%H%M%S"),
+            "content": content,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        records.append(record)
+        self._save_all(records)
+        return record
+
+    def delete(self, record_id: str) -> bool:
+        records = self._load_all()
+        original_len = len(records)
+        records = [r for r in records if r["id"] != record_id]
+        if len(records) < original_len:
+            self._save_all(records)
+            return True
+        return False
+
+    def list_all(self) -> list[dict]:
+        return self._load_all()
+
+
+class TopicMemory:
+    """主题记忆 - 可检索的偏好、事实、反思，LRU 淘汰。"""
+
+    def __init__(self, memory_dir: Path, max_entries: int = 2000):
         self.file_path = memory_dir / "topics" / "topics.jsonl"
         self.memory_dir = memory_dir / "topics"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +98,7 @@ class TopicMemory:
             for record in records:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    def store(self, content: str, pinned: bool = False,
+    def store(self, content: str,
               dedup_threshold: float = 7.0) -> MemoryRecord:
         """存储记忆，自动去重：如果与已有记忆高度相似则更新而非新增。"""
         records = self._load_all()
@@ -63,7 +115,6 @@ class TopicMemory:
         record: MemoryRecord = {
             "id": datetime.now().strftime("%Y%m%d%H%M%S"),
             "content": content,
-            "pinned": pinned,
             "recall_count": 0,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
@@ -92,15 +143,13 @@ class TopicMemory:
 
         return result
 
-    def update(self, record_id: str, content: str | None = None, pinned: bool | None = None) -> MemoryRecord | None:
+    def update(self, record_id: str, content: str | None = None) -> MemoryRecord | None:
         """更新记忆。"""
         records = self._load_all()
         for record in records:
             if record["id"] == record_id:
                 if content is not None:
                     record["content"] = content
-                if pinned is not None:
-                    record["pinned"] = pinned
                 record["updated_at"] = datetime.now().isoformat()
                 self._save_all(records)
                 return record
@@ -121,24 +170,16 @@ class TopicMemory:
         return self._load_all()
 
     def _evict(self, records: list[MemoryRecord]) -> None:
-        """超出容量时淘汰 recall_count 最低的非 pinned 记录。"""
+        """超出容量时淘汰 recall_count 最低的记录。"""
         over = len(records) - self.max_entries
         if over <= 0:
             return
-        # 按 recall_count 升序、created_at 升序（越旧越先淘汰）
         records.sort(key=lambda r: (
             r.get("recall_count", 0),
             r.get("created_at", ""),
         ))
-        # 跳过 pinned 记录
-        to_remove = []
-        for r in records:
-            if len(to_remove) >= over:
-                break
-            if not r.get("pinned"):
-                to_remove.append(r)
-        for r in to_remove:
-            records.remove(r)
+        while len(records) > self.max_entries:
+            records.pop(0)
 
 
 class ProjectMemory:
@@ -240,6 +281,7 @@ class MemoryManager:
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
         self.topics = TopicMemory(self.memory_dir)
+        self.profile = ProfileMemory(self.memory_dir)
         self.projects = ProjectMemory(self.memory_dir)
         self.daily = DailyNotes(self.memory_dir)
 
@@ -247,9 +289,13 @@ class MemoryManager:
         """从记忆库中检索相关内容。"""
         return self.topics.search(query, limit=limit)
 
-    def remember(self, content: str, pinned: bool = False) -> MemoryRecord:
-        """存储新记忆。"""
-        return self.topics.store(content, pinned=pinned)
+    def remember(self, content: str) -> MemoryRecord:
+        """存储新记忆到 topics。"""
+        return self.topics.store(content)
+
+    def remember_profile(self, content: str) -> dict:
+        """存储用户画像。"""
+        return self.profile.store(content)
 
     def project_update(self, project_id: str, key: str, value: any) -> None:
         """更新项目上下文。"""
@@ -261,10 +307,9 @@ class MemoryManager:
         """写入今日笔记。"""
         self.daily.write_note(content)
 
-    def get_pinned_memories(self) -> list[MemoryRecord]:
-        """获取固定记忆（pinned=True，始终在 system prompt 中可见）。"""
-        records = self.topics.list_all()
-        return [r for r in records if r.get("pinned")]
+    def get_profiles(self) -> list[dict]:
+        """获取所有用户画像（用于 system prompt）。"""
+        return self.profile.list_all()
 
     def inject_memories(self, messages: list[Message], query: str | None = None, max_records: int = 5) -> list[Message]:
         """将相关记忆注入消息列表前端。"""

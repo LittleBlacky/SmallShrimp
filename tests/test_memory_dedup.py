@@ -47,12 +47,6 @@ class TestMemoryDedup:
         all_records = topic_memory.list_all()
         assert len(all_records) == 2
 
-    def test_pinned_preserved_on_dedup(self, topic_memory):
-        """去重时 pinned 状态保留。"""
-        topic_memory.store("用户喜欢 Python", pinned=True)
-        r2 = topic_memory.store("用户喜欢 Python")
-        assert r2.get("pinned") is True
-
     def test_updated_at_refreshes_on_dedup(self, topic_memory):
         """去重时 updated_at 应刷新。"""
         r1 = topic_memory.store("用户喜欢 Python")

@@ -22,12 +22,11 @@ def test_topic_memory_store_and_search():
         topics = TopicMemory(Path(tmpdir))
 
         # 存储记忆
-        record1 = topics.store("用户喜欢 Python 编程", pinned=True)
+        record1 = topics.store("用户喜欢 Python 编程")
         assert record1["content"] == "用户喜欢 Python 编程"
-        assert record1.get("pinned") is True
 
         record2 = topics.store("项目使用 FastAPI 框架")
-        assert record2.get("pinned") is False
+        assert record2.get("recall_count", 0) == 0
 
         # 搜索
         results = topics.search("Python")
@@ -48,10 +47,9 @@ def test_topic_memory_update_and_delete():
         record_id = record["id"]
 
         # 更新
-        updated = topics.update(record_id, content="更新后内容", pinned=True)
+        updated = topics.update(record_id, content="更新后内容")
         assert updated is not None
         assert updated["content"] == "更新后内容"
-        assert updated.get("pinned") is True
 
         # 删除
         assert topics.delete(record_id) is True

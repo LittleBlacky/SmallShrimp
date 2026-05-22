@@ -59,10 +59,10 @@ class PromptBuilder:
         if state.source is not None:
             layers.append(self._build_channel_hint(state.source))
 
-        # Layer 6: Pinned memories（用户画像/纠正，永远可见）
-        pinned_block = self._build_pinned_block(state)
-        if pinned_block:
-            layers.append(pinned_block)
+        # Layer 6: Profile（用户画像）
+        profile_block = self._build_profile_block(state)
+        if profile_block:
+            layers.append(profile_block)
 
         return "\n\n".join(layers)
 
@@ -99,16 +99,16 @@ class PromptBuilder:
 
         return "\n\n".join(parts)
 
-    def _build_pinned_block(self, state: "SessionState") -> str:
-        """注入 pinned 记忆到 system prompt（用户画像/纠正，永不淘汰）。"""
+    def _build_profile_block(self, state: "SessionState") -> str:
+        """注入 profile 到 system prompt。"""
         memory_manager = getattr(state.agent, "memory_manager", None)
         if memory_manager is None:
             return ""
-        pinned = memory_manager.get_pinned_memories()
-        if not pinned:
+        profiles = memory_manager.get_profiles()
+        if not profiles:
             return ""
-        lines = ["## 记忆\n"]
-        for r in pinned:
+        lines = ["## 用户画像\n"]
+        for r in profiles:
             lines.append(f"- {r['content']}")
         return "\n".join(lines)
 
