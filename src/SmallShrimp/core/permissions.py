@@ -28,7 +28,7 @@ class PermissionMode(str, Enum):
 
 
 SAFE_TOOLS: set[str] = {"read", "glob", "grep", "websearch", "webread", "skill",
-                       "recall_memory", "remember", "remember_profile"}
+                       "recall_memory", "remember"}
 CONFIRM_TOOLS: set[str] = {"write"}
 PLAN_TOOLS: set[str] = {}
 

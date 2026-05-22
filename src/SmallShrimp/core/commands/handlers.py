@@ -96,11 +96,9 @@ async def cmd_remember(context: CommandContext, args: list[str]) -> str:
     pinned = "#pinned" in content
     content_clean = re.sub(r"#pinned", "", content).strip()
 
-    if pinned:
-        record = context.memory.remember_profile(content_clean)
-        return f"✓ 已记住 [画像]: {record['content'][:100]}"
-    record = context.memory.remember(content_clean)
-    return f"✓ 已记住: {record['content'][:100]}"
+    record = context.memory.remember(content_clean, pinned=pinned)
+    pin_str = " [画像]" if pinned else ""
+    return f"✓ 已记住{pin_str}: {record['content'][:100]}"
 
 @register_command(name="recall", description="搜索记忆", usage="/recall <query>")
 async def cmd_recall(context: CommandContext, args: list[str]) -> str:

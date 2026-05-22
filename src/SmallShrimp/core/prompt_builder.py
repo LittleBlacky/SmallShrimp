@@ -68,11 +68,10 @@ class PromptBuilder:
         if getattr(state.agent, "memory_manager", None):
             layers.append(
                 "## 记忆指南\n\n"
-                "当用户分享关于自己的新信息（姓名、偏好、习惯、计划、纠正）时，"
-                "主动使用记忆工具保存，无需等待用户明确指令。\n"
-                "- remember_profile：保存身份、长期偏好\n"
-                "- remember：保存可检索的事实、上下文\n"
-                "- recall_memory：不确定时先查记忆再回答\n"
+                "当用户分享关于自己的新信息时，主动使用记忆工具保存。\n"
+                "- remember(content, pinned=True)：保存身份、长期偏好（会始终可见）\n"
+                "- remember(content)：保存可检索的事实、上下文\n"
+                "- recall_memory(query)：不确定时先查记忆再回答\n"
                 "不要保存可从当前上下文推导的临时信息。"
             )
 
@@ -112,15 +111,15 @@ class PromptBuilder:
         return "\n\n".join(parts)
 
     def _build_profile_block(self, state: "SessionState") -> str:
-        """注入 profile 到 system prompt。"""
+        """注入 pinned 记忆到 system prompt。"""
         memory_manager = getattr(state.agent, "memory_manager", None)
         if memory_manager is None:
             return ""
-        profiles = memory_manager.get_profiles()
-        if not profiles:
+        pinned = memory_manager.get_pinned()
+        if not pinned:
             return ""
-        lines = ["## 用户画像\n"]
-        for r in profiles:
+        lines = ["## 记忆\n"]
+        for r in pinned:
             lines.append(f"- {r['content']}")
         return "\n".join(lines)
 
