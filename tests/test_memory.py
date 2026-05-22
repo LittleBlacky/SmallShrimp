@@ -22,19 +22,15 @@ def test_topic_memory_store_and_search():
         topics = TopicMemory(Path(tmpdir))
 
         # 存储记忆
-        record1 = topics.store("用户喜欢 Python 编程", tags=["python", "偏好"])
+        record1 = topics.store("用户喜欢 Python 编程", pinned=True)
         assert record1["content"] == "用户喜欢 Python 编程"
-        assert "python" in record1["tags"]
+        assert record1.get("pinned") is True
 
-        record2 = topics.store("项目使用 FastAPI 框架", tags=["python", "项目"])
-        assert "python" in record2["tags"]
+        record2 = topics.store("项目使用 FastAPI 框架")
+        assert record2.get("pinned") is False
 
         # 搜索
         results = topics.search("Python")
-        assert len(results) >= 1
-
-        # 标签过滤
-        results = topics.search("Python", tags=["偏好"])
         assert len(results) >= 1
 
         # 空搜索
@@ -48,14 +44,14 @@ def test_topic_memory_update_and_delete():
         from src.SmallShrimp.core.memory.memory_manager import TopicMemory
         topics = TopicMemory(Path(tmpdir))
 
-        record = topics.store("原始内容", tags=["test"])
+        record = topics.store("原始内容")
         record_id = record["id"]
 
         # 更新
-        updated = topics.update(record_id, content="更新后内容", tags=["updated"])
+        updated = topics.update(record_id, content="更新后内容", pinned=True)
         assert updated is not None
         assert updated["content"] == "更新后内容"
-        assert "updated" in updated["tags"]
+        assert updated.get("pinned") is True
 
         # 删除
         assert topics.delete(record_id) is True
@@ -113,7 +109,7 @@ def test_memory_recall():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
 
-        manager.remember("用户偏好使用 dark mode", tags=["偏好", "界面"])
+        manager.remember("用户偏好使用 dark mode")
 
         results = manager.recall("dark mode")
         assert len(results) >= 1
@@ -125,7 +121,7 @@ def test_memory_remember():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
 
-        record = manager.remember("这是一个重要的事实", tags=["事实"])
+        record = manager.remember("这是一个重要的事实")
         assert record["content"] == "这是一个重要的事实"
 
 
@@ -160,7 +156,7 @@ def test_inject_memories():
         manager = MemoryManager(Path(tmpdir))
 
         # 存储记忆
-        manager.remember("用户使用 DeepSeek API", tags=["api"])
+        manager.remember("用户使用 DeepSeek API")
 
         # 构建消息列表
         messages = [

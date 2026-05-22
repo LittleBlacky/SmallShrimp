@@ -50,13 +50,19 @@ class PromptBuilder:
 
         # Layer 4: Runtime context
         agent_id = getattr(agent_def, "id", agent_def.name)
+        session_time = getattr(state, "created_at", datetime.now().isoformat())
         layers.append(
-            f"## Runtime\n\nAgent: {agent_id}\nTime: {datetime.now().isoformat()}"
+            f"## Runtime\n\nAgent: {agent_id}\nTime: {session_time}"
         )
 
         # Layer 5: Channel hint
         if state.source is not None:
             layers.append(self._build_channel_hint(state.source))
+
+        # Layer 6: Pinned memories（用户画像/纠正，永远可见）
+        pinned_block = self._build_pinned_block(state)
+        if pinned_block:
+            layers.append(pinned_block)
 
         return "\n\n".join(layers)
 
@@ -92,6 +98,19 @@ class PromptBuilder:
             parts.append(agents_path.read_text(encoding="utf-8").strip())
 
         return "\n\n".join(parts)
+
+    def _build_pinned_block(self, state: "SessionState") -> str:
+        """注入 pinned 记忆到 system prompt（用户画像/纠正，永不淘汰）。"""
+        memory_manager = getattr(state.agent, "memory_manager", None)
+        if memory_manager is None:
+            return ""
+        pinned = memory_manager.get_pinned_memories()
+        if not pinned:
+            return ""
+        lines = ["## 记忆\n"]
+        for r in pinned:
+            lines.append(f"- {r['content']}")
+        return "\n".join(lines)
 
     def _build_channel_hint(self, source: "EventSource") -> str:
         """Build platform/channel hint for the agent."""

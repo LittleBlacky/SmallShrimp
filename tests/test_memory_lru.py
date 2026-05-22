@@ -86,15 +86,15 @@ class TestLRUEviction:
         assert "Python 开发" in contents
         assert "深色模式偏好" in contents
 
-    def test_tagged_records_protected(self, topic_memory):
-        """有 tags 的记录不会被淘汰。"""
-        topic_memory.store("tagged 记忆", tags=["重要"])
+    def test_pinned_records_protected(self, topic_memory):
+        """pinned 记录不会被淘汰。"""
+        topic_memory.store("pinned 记忆", pinned=True)
         for i in range(10):
             topic_memory.store(f"普通记忆{i}")
 
         all_records = topic_memory.list_all()
         contents = {r["content"] for r in all_records}
-        assert "tagged 记忆" in contents
+        assert "pinned 记忆" in contents
 
     def test_no_eviction_within_capacity(self, topic_memory):
         """不超过 max_entries 时不淘汰。"""

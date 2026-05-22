@@ -15,7 +15,7 @@ class MemoryRecord(TypedDict, total=False):
     """记忆记录结构。"""
     id: str
     content: str
-    tags: list[str]
+    pinned: bool
     recall_count: int
     created_at: str
     updated_at: str
@@ -46,20 +46,16 @@ class TopicMemory:
             for record in records:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    def store(self, content: str, tags: list[str] | None = None,
+    def store(self, content: str, pinned: bool = False,
               dedup_threshold: float = 7.0) -> MemoryRecord:
         """存储记忆，自动去重：如果与已有记忆高度相似则更新而非新增。"""
         records = self._load_all()
-        tags = tags or []
 
         # 去重：用 _rank_memory 检测相似度
         for existing in records:
             score = _rank_memory(content, existing.get("content", ""))
             if score >= dedup_threshold:
-                # 合并 tags
-                merged_tags = list(set(existing.get("tags", []) + tags))
                 existing["content"] = content
-                existing["tags"] = merged_tags
                 existing["updated_at"] = datetime.now().isoformat()
                 self._save_all(records)
                 return existing
@@ -67,7 +63,7 @@ class TopicMemory:
         record: MemoryRecord = {
             "id": datetime.now().strftime("%Y%m%d%H%M%S"),
             "content": content,
-            "tags": tags,
+            "pinned": pinned,
             "recall_count": 0,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
@@ -77,13 +73,11 @@ class TopicMemory:
         self._save_all(records)
         return record
 
-    def search(self, query: str, tags: list[str] | None = None, limit: int = 10) -> list[MemoryRecord]:
+    def search(self, query: str, limit: int = 10) -> list[MemoryRecord]:
         """混合词法评分搜索，命中记录自动累加 recall_count。"""
         records = self._load_all()
         scored: list[tuple[float, MemoryRecord]] = []
         for r in records:
-            if tags and not any(t in r.get("tags", []) for t in tags):
-                continue
             score = _rank_memory(query, r.get("content", ""))
             if score > 0 or not query:
                 scored.append((score, r))
@@ -98,15 +92,15 @@ class TopicMemory:
 
         return result
 
-    def update(self, record_id: str, content: str | None = None, tags: list[str] | None = None) -> MemoryRecord | None:
+    def update(self, record_id: str, content: str | None = None, pinned: bool | None = None) -> MemoryRecord | None:
         """更新记忆。"""
         records = self._load_all()
         for record in records:
             if record["id"] == record_id:
                 if content is not None:
                     record["content"] = content
-                if tags is not None:
-                    record["tags"] = tags
+                if pinned is not None:
+                    record["pinned"] = pinned
                 record["updated_at"] = datetime.now().isoformat()
                 self._save_all(records)
                 return record
@@ -127,7 +121,7 @@ class TopicMemory:
         return self._load_all()
 
     def _evict(self, records: list[MemoryRecord]) -> None:
-        """超出容量时淘汰 recall_count 最低的非标签记录。"""
+        """超出容量时淘汰 recall_count 最低的非 pinned 记录。"""
         over = len(records) - self.max_entries
         if over <= 0:
             return
@@ -136,12 +130,12 @@ class TopicMemory:
             r.get("recall_count", 0),
             r.get("created_at", ""),
         ))
-        # 跳过有 tags 的记录（视为重要元数据）
+        # 跳过 pinned 记录
         to_remove = []
         for r in records:
             if len(to_remove) >= over:
                 break
-            if not r.get("tags"):
+            if not r.get("pinned"):
                 to_remove.append(r)
         for r in to_remove:
             records.remove(r)
@@ -253,9 +247,9 @@ class MemoryManager:
         """从记忆库中检索相关内容。"""
         return self.topics.search(query, limit=limit)
 
-    def remember(self, content: str, tags: list[str] | None = None) -> MemoryRecord:
+    def remember(self, content: str, pinned: bool = False) -> MemoryRecord:
         """存储新记忆。"""
-        return self.topics.store(content, tags)
+        return self.topics.store(content, pinned=pinned)
 
     def project_update(self, project_id: str, key: str, value: any) -> None:
         """更新项目上下文。"""
@@ -266,6 +260,11 @@ class MemoryManager:
     def today_note(self, content: str) -> None:
         """写入今日笔记。"""
         self.daily.write_note(content)
+
+    def get_pinned_memories(self) -> list[MemoryRecord]:
+        """获取固定记忆（pinned=True，始终在 system prompt 中可见）。"""
+        records = self.topics.list_all()
+        return [r for r in records if r.get("pinned")]
 
     def inject_memories(self, messages: list[Message], query: str | None = None, max_records: int = 5) -> list[Message]:
         """将相关记忆注入消息列表前端。"""
@@ -279,8 +278,7 @@ class MemoryManager:
 
         memory_lines = ["## 相关记忆\n"]
         for r in records:
-            tags_str = f"[{'/'.join(r['tags'])}]" if r.get("tags") else ""
-            memory_lines.append(f"- {r['content']} {tags_str}")
+            memory_lines.append(f"- {r['content']}")
         memory_content = "\n".join(memory_lines)
 
         # 插入到 system message 之后

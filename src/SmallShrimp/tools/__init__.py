@@ -55,3 +55,9 @@ def register_context_tools(registry: ToolRegistry, context) -> None:
         subagent_tool = create_subagent_dispatch_tool(agent_id, context)
         if subagent_tool:
             registry.register(subagent_tool)
+
+    # 记忆工具：有记忆管理器时注册
+    if context.memory_manager is not None:
+        from .memory_tool import create_memory_tools
+        for t in create_memory_tools(context.memory_manager):
+            registry.register(t)

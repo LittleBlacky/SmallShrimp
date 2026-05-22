@@ -91,14 +91,14 @@ async def cmd_remember(context: CommandContext, args: list[str]) -> str:
     if not args:
         return "用法: /remember <内容>\n例如: /remember 用户喜欢用 dark mode"
     content = " ".join(args)
-    # 尝试提取标签 (#tag 格式)
+    # 尝试提取 #pinned 标记
     import re
-    tags = re.findall(r"#(\w+)", content)
-    content_clean = re.sub(r"#\w+", "", content).strip()
+    pinned = "#pinned" in content
+    content_clean = re.sub(r"#pinned", "", content).strip()
 
-    record = context.memory.remember(content_clean, tags=tags if tags else None)
-    tag_str = f" [#{'/'.join(tags)}]" if tags else ""
-    return f"✓ 已记住: {record['content'][:100]}{tag_str}"
+    record = context.memory.remember(content_clean, pinned=pinned)
+    pin_str = " 📌" if pinned else ""
+    return f"✓ 已记住: {record['content'][:100]}{pin_str}"
 
 @register_command(name="recall", description="搜索记忆", usage="/recall <query>")
 async def cmd_recall(context: CommandContext, args: list[str]) -> str:
@@ -111,8 +111,8 @@ async def cmd_recall(context: CommandContext, args: list[str]) -> str:
         return f"没有找到关于 '{query}' 的记忆"
     lines = [f"找到 {len(results)} 条相关记忆:\n"]
     for r in results:
-        tags_str = f"[#{'/'.join(r['tags'])}]" if r.get("tags") else ""
-        lines.append(f"  • {r['content'][:80]}... {tags_str}")
+        pin_str = " 📌" if r.get("pinned") else ""
+        lines.append(f"  • {r['content'][:80]}...{pin_str}")
     return "\n".join(lines)
 
 @register_command(name="memories", description="查看所有记忆", usage="/memories")
@@ -123,9 +123,9 @@ async def cmd_memories(context: CommandContext, args: list[str]) -> str:
         return "还没有任何记忆。使用 /remember <内容> 来添加。"
     lines = [f"共 {len(records)} 条记忆:\n"]
     for r in records:
-        tags_str = f"[#{'/'.join(r['tags'])}]" if r.get("tags") else ""
+        pin_str = " 📌" if r.get("pinned") else ""
         date_str = r["created_at"][:10]
-        lines.append(f"  [{date_str}] {r['content'][:60]}... {tags_str}")
+        lines.append(f"  [{date_str}] {r['content'][:60]}...{pin_str}")
     return "\n".join(lines)
 
 @register_command(name="forget", description="删除记忆", usage="/forget <关键词>")

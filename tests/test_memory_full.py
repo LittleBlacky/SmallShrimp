@@ -13,9 +13,8 @@ def test_topic_store():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         topics = TopicMemory(Path(tmpdir))
-        record = topics.store("用户偏好 Python", tags=["preference"])
+        record = topics.store("用户偏好 Python")
         assert record["content"] == "用户偏好 Python"
-        assert "preference" in record["tags"]
         assert "id" in record
 
 
@@ -32,20 +31,6 @@ def test_topic_search_by_keyword():
         results = topics.search("python")
         assert len(results) == 1
         assert "Python" in results[0]["content"]
-
-
-def test_topic_search_by_tag():
-    """按标签过滤。"""
-    from src.SmallShrimp.core.memory.memory_manager import TopicMemory
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        topics = TopicMemory(Path(tmpdir))
-        topics.store("事实A", tags=["fact"])
-        topics.store("偏好B", tags=["preference"])
-
-        results = topics.search("", tags=["preference"])
-        assert len(results) == 1
-        assert "偏好B" in results[0]["content"]
 
 
 def test_topic_search_limit():
@@ -190,7 +175,7 @@ def test_memory_manager_remember():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         mgr = MemoryManager(Path(tmpdir))
-        record = mgr.remember("用户偏好 dark mode", tags=["preference"])
+        record = mgr.remember("用户偏好 dark mode")
         assert record["content"] == "用户偏好 dark mode"
 
 

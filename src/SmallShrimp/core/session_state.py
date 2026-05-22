@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from ..core.history import HistoryManager
     from ..core.prompt_builder import PromptBuilder
 
+from datetime import datetime
+
 from ..core.message import Message, HumanMessage, AssistantMessage, SystemMessage
 
 @dataclass
@@ -22,6 +24,7 @@ class SessionState:
     source: Optional["EventSource"] = None
     history_manager: Optional["HistoryManager"] = None
     prompt_builder: Optional["PromptBuilder"] = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())  # 会话创建时间（固化，保护 prompt 缓存）
 
     def add_user_message(self, content: str) -> None:
         self.messages.append(HumanMessage(content=content))

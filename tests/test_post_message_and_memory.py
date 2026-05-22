@@ -101,10 +101,9 @@ def test_memory_manager_remember():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         topics = TopicMemory(Path(tmpdir))
-        record = topics.store("用户偏好 Python", tags=["preference"])
+        record = topics.store("用户偏好 Python")
 
         assert record["content"] == "用户偏好 Python"
-        assert "preference" in record["tags"]
 
 
 def test_memory_manager_search():
