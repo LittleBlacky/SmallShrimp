@@ -64,6 +64,18 @@ class PromptBuilder:
         if profile_block:
             layers.append(profile_block)
 
+        # Layer 7: Memory guidelines（记忆工具使用指南）
+        if getattr(state.agent, "memory_manager", None):
+            layers.append(
+                "## 记忆指南\n\n"
+                "当用户分享关于自己的新信息（姓名、偏好、习惯、计划、纠正）时，"
+                "主动使用记忆工具保存，无需等待用户明确指令。\n"
+                "- remember_profile：保存身份、长期偏好\n"
+                "- remember：保存可检索的事实、上下文\n"
+                "- recall_memory：不确定时先查记忆再回答\n"
+                "不要保存可从当前上下文推导的临时信息。"
+            )
+
         return "\n\n".join(layers)
 
     def _build_legacy_identity(self, agent_def) -> str:
