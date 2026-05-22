@@ -11,11 +11,12 @@ from typing import TypedDict
 from ..message import HumanMessage, AssistantMessage, Message
 
 
-class MemoryRecord(TypedDict):
+class MemoryRecord(TypedDict, total=False):
     """记忆记录结构。"""
     id: str
     content: str
     tags: list[str]
+    recall_count: int
     created_at: str
     updated_at: str
 
@@ -23,10 +24,11 @@ class MemoryRecord(TypedDict):
 class TopicMemory:
     """主题记忆 - 长期存储的事实和偏好。"""
 
-    def __init__(self, memory_dir: Path):
+    def __init__(self, memory_dir: Path, max_entries: int = 100):
         self.file_path = memory_dir / "topics" / "topics.jsonl"
         self.memory_dir = memory_dir / "topics"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
+        self.max_entries = max_entries
 
     def _load_all(self) -> list[MemoryRecord]:
         if not self.file_path.exists():
@@ -66,15 +68,17 @@ class TopicMemory:
             "id": datetime.now().strftime("%Y%m%d%H%M%S"),
             "content": content,
             "tags": tags,
+            "recall_count": 0,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }
         records.append(record)
+        self._evict(records)
         self._save_all(records)
         return record
 
     def search(self, query: str, tags: list[str] | None = None, limit: int = 10) -> list[MemoryRecord]:
-        """混合词法评分搜索（对齐 ZLAgent）。"""
+        """混合词法评分搜索，命中记录自动累加 recall_count。"""
         records = self._load_all()
         scored: list[tuple[float, MemoryRecord]] = []
         for r in records:
@@ -84,7 +88,15 @@ class TopicMemory:
             if score > 0 or not query:
                 scored.append((score, r))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [r for _, r in scored[:limit]]
+        result = [r for _, r in scored[:limit]]
+
+        # 命中计次：更新 recall_count 并回写
+        if result and query:
+            for r in result:
+                r["recall_count"] = r.get("recall_count", 0) + 1
+            self._save_all(records)
+
+        return result
 
     def update(self, record_id: str, content: str | None = None, tags: list[str] | None = None) -> MemoryRecord | None:
         """更新记忆。"""
@@ -113,6 +125,26 @@ class TopicMemory:
     def list_all(self) -> list[MemoryRecord]:
         """列出所有记忆。"""
         return self._load_all()
+
+    def _evict(self, records: list[MemoryRecord]) -> None:
+        """超出容量时淘汰 recall_count 最低的非标签记录。"""
+        over = len(records) - self.max_entries
+        if over <= 0:
+            return
+        # 按 recall_count 升序、created_at 升序（越旧越先淘汰）
+        records.sort(key=lambda r: (
+            r.get("recall_count", 0),
+            r.get("created_at", ""),
+        ))
+        # 跳过有 tags 的记录（视为重要元数据）
+        to_remove = []
+        for r in records:
+            if len(to_remove) >= over:
+                break
+            if not r.get("tags"):
+                to_remove.append(r)
+        for r in to_remove:
+            records.remove(r)
 
 
 class ProjectMemory:
