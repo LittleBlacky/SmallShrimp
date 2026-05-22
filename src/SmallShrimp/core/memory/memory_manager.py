@@ -1,7 +1,9 @@
 from __future__ import annotations
 """Memory Manager - Manages persistent memories across sessions."""
 import json
+import math
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import datetime, date
 from typing import TypedDict
@@ -57,24 +59,17 @@ class TopicMemory:
         return record
 
     def search(self, query: str, tags: list[str] | None = None, limit: int = 10) -> list[MemoryRecord]:
-        """搜索记忆。"""
+        """混合词法评分搜索（对齐 ZLAgent）。"""
         records = self._load_all()
-        results = []
-        query_lower = query.lower()
-        for record in records:
-            # 标签过滤
-            if tags:
-                if not any(t in record.get("tags", []) for t in tags):
-                    continue
-            # 关键词匹配
-            if query_lower:
-                if query_lower in record["content"].lower():
-                    results.append(record)
-            else:
-                results.append(record)
-        # 按时间倒序
-        results.sort(key=lambda r: r["created_at"], reverse=True)
-        return results[:limit]
+        scored: list[tuple[float, MemoryRecord]] = []
+        for r in records:
+            if tags and not any(t in r.get("tags", []) for t in tags):
+                continue
+            score = _rank_memory(query, r.get("content", ""))
+            if score > 0 or not query:
+                scored.append((score, r))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in scored[:limit]]
 
     def update(self, record_id: str, content: str | None = None, tags: list[str] | None = None) -> MemoryRecord | None:
         """更新记忆。"""
@@ -247,3 +242,51 @@ class MemoryManager:
         result = [messages[0], memory_msg] if messages else [memory_msg]
         result.extend(messages[1:] if len(messages) > 1 else [])
         return result
+
+
+# ── Hybrid Lexical Ranking (aligned with ZLAgent) ──────────
+
+def _char_ngrams(text: str, n: int = 2) -> set[str]:
+    """字符 n-gram 集合，用于中英文混合匹配。"""
+    clean = text.lower().strip()
+    return {clean[i:i+n] for i in range(len(clean) - n + 1)}
+
+def _word_terms(text: str) -> set[str]:
+    """单词/词组分词（支持中英文混合）。"""
+    # CJK 单字作为 term
+    cjk = set(re.findall(r'[\u4e00-\u9fff]', text))
+    # ASCII 单词（>=2 字符）
+    ascii_words = set(w.lower() for w in re.findall(r'[a-zA-Z]{2,}', text))
+    return cjk | ascii_words
+
+def _rank_memory(query: str, content: str) -> float:
+    """混合词法评分：子串 + 词重叠 + n-gram + 序列相似度。"""
+    if not query or not content:
+        return 0.0
+
+    q = query.lower().strip()
+    c = content.lower().strip()
+    score = 0.0
+
+    # 1. 精确子串匹配（最高权重，等同 ZLAgent 的 +8.0）
+    if q in c:
+        score += 8.0
+
+    # 2. 词重叠
+    q_terms = _word_terms(q)
+    c_terms = _word_terms(c)
+    if q_terms:
+        score += 4.0 * (len(q_terms & c_terms) / len(q_terms))
+
+    # 3. 字符 n-gram
+    q_grams = _char_ngrams(q)
+    c_grams = _char_ngrams(c)
+    if q_grams:
+        score += 3.0 * (len(q_grams & c_grams) / len(q_grams))
+
+    # 4. 序列相似度
+    ratio = SequenceMatcher(None, q, c).ratio()
+    if ratio >= 0.12:
+        score += 2.0 * ratio
+
+    return score

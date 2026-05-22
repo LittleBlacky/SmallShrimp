@@ -119,7 +119,7 @@ def test_memory_manager_search():
         topics.store("项目名叫 SmallShrimp")
 
         results = topics.search("dark")
-        assert len(results) == 1
+        assert len(results) >= 1
         assert "dark mode" in results[0]["content"]
 
         results = topics.search("")
