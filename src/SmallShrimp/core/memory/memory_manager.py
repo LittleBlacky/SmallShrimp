@@ -44,16 +44,31 @@ class TopicMemory:
             for record in records:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    def store(self, content: str, tags: list[str] | None = None) -> MemoryRecord:
-        """存储记忆。"""
+    def store(self, content: str, tags: list[str] | None = None,
+              dedup_threshold: float = 7.0) -> MemoryRecord:
+        """存储记忆，自动去重：如果与已有记忆高度相似则更新而非新增。"""
+        records = self._load_all()
+        tags = tags or []
+
+        # 去重：用 _rank_memory 检测相似度
+        for existing in records:
+            score = _rank_memory(content, existing.get("content", ""))
+            if score >= dedup_threshold:
+                # 合并 tags
+                merged_tags = list(set(existing.get("tags", []) + tags))
+                existing["content"] = content
+                existing["tags"] = merged_tags
+                existing["updated_at"] = datetime.now().isoformat()
+                self._save_all(records)
+                return existing
+
         record: MemoryRecord = {
             "id": datetime.now().strftime("%Y%m%d%H%M%S"),
             "content": content,
-            "tags": tags or [],
+            "tags": tags,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }
-        records = self._load_all()
         records.append(record)
         self._save_all(records)
         return record
