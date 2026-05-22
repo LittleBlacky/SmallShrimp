@@ -46,6 +46,13 @@ docs/
 **/config.runtime.yaml
 
 **/sessions/**.json
+**/.cache/
+
+# Workspace runtime data
+workspace/sessions/
+workspace/.cache/
+workspace/memories/
+workspace/crons/
 
 **/uv.lock
 

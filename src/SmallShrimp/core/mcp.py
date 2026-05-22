@@ -48,6 +48,10 @@ class McpManager:
                 self.configure(mcp_servers)
             config.on_change(lambda data: self._on_config_reload(data))
 
+    def configure(self, servers: dict[str, dict]) -> None:
+        """加载 MCP 服务器配置。"""
+        self._servers.update(servers)
+
     def _on_config_reload(self, data: dict):
         import asyncio
         asyncio.create_task(reconfigure_mcp(self, self._tool_registry, data))
