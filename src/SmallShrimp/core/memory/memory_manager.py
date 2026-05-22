@@ -46,9 +46,13 @@ class ProfileMemory:
 
     def store(self, content: str) -> dict:
         records = self._load_all()
-        # 去重：内容完全相同则跳过
+        # 去重：内容完全相同或高度相似则更新
         for existing in records:
-            if existing.get("content", "").strip() == content.strip():
+            score = _rank_memory(content, existing.get("content", ""))
+            if score >= 7.0:
+                existing["content"] = content
+                existing["updated_at"] = datetime.now().isoformat()
+                self._save_all(records)
                 return existing
         record = {
             "id": datetime.now().strftime("%Y%m%d%H%M%S"),
