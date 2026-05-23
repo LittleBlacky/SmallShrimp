@@ -1,34 +1,42 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """Context 测试。"""
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 
-def test_context_from_workspace():
+def _write_minimal_workspace(ws: Path) -> None:
+    (ws / "config.user.yaml").write_text(
+        "default_provider: deepseek\nproviders:\n  deepseek:\n    api_key: test\n    api_base: https://api.deepseek.com\n",
+        encoding="utf-8",
+    )
+    agent_dir = ws / "agents" / "pickle"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "AGENT.md").write_text(
+        "---\nname: Pickle\ndescription: Test\nllm:\n  provider: deepseek\n  model: deepseek/deepseek-chat\n---\n\n# Pickle\n",
+        encoding="utf-8",
+    )
+    (ws / "skills").mkdir()
+    (ws / "sessions").mkdir()
+    (ws / "memories").mkdir()
+
+
+def test_context_from_workspace(workspace_tmp):
     """测试从工作区创建 Context。"""
     from src.SmallShrimp.server.context import Context
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ws = Path(tmpdir)
-        (ws / "config.user.yaml").write_text("default_provider: openai\nproviders:\n  openai:\n    api_key: test\n")
-        (ws / "agents").mkdir()
-        (ws / "skills").mkdir()
-        (ws / "sessions").mkdir()
-        (ws / "memories").mkdir()
+    _write_minimal_workspace(workspace_tmp)
+    context = Context.from_workspace(workspace_tmp)
 
-        context = Context.from_workspace(ws)
-
-        assert context.config is not None
-        assert context.agent_loader is not None
-        assert context.skill_loader is not None
-        assert context.history_manager is not None
-        assert context.tool_registry is not None
-        assert context.eventbus is not None
-        assert context.command_registry is not None
-        assert context.prompt_builder is not None
-        assert context.memory_manager is not None
-        assert context.channels == []
+    assert context.config is not None
+    assert context.agent_loader is not None
+    assert context.skill_loader is not None
+    assert context.history_manager is not None
+    assert context.tool_registry is not None
+    assert context.eventbus is not None
+    assert context.command_registry is not None
+    assert context.prompt_builder is not None
+    assert context.memory_manager is not None
+    assert context.channels == []
 
 
 def test_context_dataclass_manual():
@@ -66,7 +74,31 @@ def test_context_dataclass_manual():
     assert context.websocket_worker is None
 
 
+def test_context_agent_receives_memory_manager_in_prompt(workspace_tmp):
+    """Context 创建的 Agent 必须共享 memory_manager，否则 User Profile 不会进入 prompt。"""
+    from src.SmallShrimp.core.agent import Agent
+    from src.SmallShrimp.server.context import Context
+
+    _write_minimal_workspace(workspace_tmp)
+    context = Context.from_workspace(workspace_tmp)
+    context.memory_manager.remember_profile("我叫zane")
+    agent_def = context.agent_loader.load("pickle")
+    agent = Agent(
+        agent_def,
+        context.config,
+        context.tool_registry,
+        context.history_manager,
+        prompt_builder=context.prompt_builder,
+        memory_manager=context.memory_manager,
+    )
+    session = agent.new_session()
+
+    system_prompt = session.state.build_messages()[0]["content"]
+    assert agent.memory_manager is context.memory_manager
+    assert "## User Profile" in system_prompt
+    assert "我叫zane" in system_prompt
+
+
 if __name__ == "__main__":
-    test_context_from_workspace()
-    test_context_dataclass_manual()
-    print("\nAll test_context tests passed!")
+    raise SystemExit("Run with pytest")
+

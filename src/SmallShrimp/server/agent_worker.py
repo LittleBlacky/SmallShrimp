@@ -101,6 +101,7 @@ class AgentWorker(SubscriberWorker):
                     self.context.tool_registry,
                     self.context.history_manager,
                     prompt_builder=self.context.prompt_builder,
+                    memory_manager=self.context.memory_manager,
                 )
 
                 # 恢复或创建会话
@@ -117,7 +118,11 @@ class AgentWorker(SubscriberWorker):
                 # 优先检查斜杠命令
                 if event.content.startswith("/"):
                     from ..core.commands.handlers import CommandContext
-                    cmd_context = CommandContext(session, routing_table=self.context.routing_table)
+                    cmd_context = CommandContext(
+                        session,
+                        routing_table=self.context.routing_table,
+                        memory_manager=self.context.memory_manager,
+                    )
                     result = await self.context.command_registry.dispatch(
                         event.content, cmd_context
                     )

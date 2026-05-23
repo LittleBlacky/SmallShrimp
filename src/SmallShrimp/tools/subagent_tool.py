@@ -60,6 +60,7 @@ def create_subagent_dispatch_tool(
             _ctx.tool_registry,
             _ctx.history_manager,
             prompt_builder=_ctx.prompt_builder,
+            memory_manager=_ctx.memory_manager,
         )
         agent_source = AgentEventSource(agent_id=current_agent_id)
         agent_session = agent.new_session(source=agent_source)

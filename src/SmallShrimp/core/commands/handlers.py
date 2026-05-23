@@ -15,17 +15,20 @@ class CommandContext:
         self,
         session: "AgentSession",
         routing_table: "RoutingTable | None" = None,
+        memory_manager: MemoryManager | None = None,
     ) -> None:
         self.session = session
         self.routing_table = routing_table
-        self._memory_manager: MemoryManager | None = None
+        self._memory_manager = memory_manager
 
     @property
     def memory(self) -> MemoryManager:
         if self._memory_manager is None:
             from pathlib import Path
-            self._memory_manager = MemoryManager(Path("workspace/memories"))
+            agent_memory = getattr(self.session.agent, "memory_manager", None)
+            self._memory_manager = agent_memory or MemoryManager(Path("workspace/memories"))
         return self._memory_manager
+
 @register_command(name="skill", description="加载技能内容", usage="/skill <name>")
 async def cmd_skill(context: CommandContext, args: list[str]) -> str:
     """加载技能命令。"""

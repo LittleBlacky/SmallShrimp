@@ -45,6 +45,7 @@ class ChatLoop:
             self.context.tool_registry,
             self.context.history_manager,
             prompt_builder=self.context.prompt_builder,
+            memory_manager=self.context.memory_manager,
         )
         self.session = self.agent.new_session(source=CliEventSource())
 
@@ -70,7 +71,11 @@ class ChatLoop:
                 from ..core.commands.registry import CommandRegistry
                 from ..core.commands.handlers import CommandContext
 
-                cmd_context = CommandContext(self.session, routing_table=self.context.routing_table)
+                cmd_context = CommandContext(
+                    self.session,
+                    routing_table=self.context.routing_table,
+                    memory_manager=self.context.memory_manager,
+                )
                 result = await CommandRegistry.dispatch(event.content, cmd_context)
                 if result:
                     await self.context.eventbus.publish(
