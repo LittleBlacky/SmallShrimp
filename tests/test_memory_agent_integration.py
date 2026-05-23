@@ -1,8 +1,10 @@
-"""Agent 层记忆集成测试 — 合并后的 pinned 模型。"""
+"""Agent 层记忆集成测试 — 分层记忆模型。"""
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
+
 import pytest
+
 from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 from src.SmallShrimp.core.prompt_builder import PromptBuilder
 from src.SmallShrimp.core.session_state import SessionState
@@ -25,8 +27,8 @@ def _make_agent(mem, toolbox):
 
 def _register(mem, toolbox):
     from src.SmallShrimp.tools.memory_tool import create_memory_tools
-    for t in create_memory_tools(mem):
-        toolbox.register(t)
+    for tool in create_memory_tools(mem):
+        toolbox.register(tool)
 
 
 @pytest.fixture
@@ -37,85 +39,93 @@ def toolbox():
 
 @pytest.fixture
 def setup():
-    with tempfile.TemporaryDirectory() as d:
-        ws = Path(d)
-        mem = MemoryManager(ws / "memories")
-        pb = PromptBuilder(ws)
-        yield mem, pb
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        mem = MemoryManager(workspace / "memories")
+        prompt_builder = PromptBuilder(workspace)
+        yield mem, prompt_builder
 
 
 class TestPrompt:
-    def test_pinned_in_prompt(self, setup, toolbox):
-        mem, pb = setup
-        mem.remember("用户叫 Zane", pinned=True)
+    def test_profile_in_prompt(self, setup, toolbox):
+        mem, prompt_builder = setup
+        mem.remember_profile("用户叫 Zane")
         agent = _make_agent(mem, toolbox)
-        state = SessionState(session_id="x", agent=agent, prompt_builder=pb)
+        state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
         content = state.build_messages()[0]["content"]
+        assert "User Profile" in content
         assert "Zane" in content
         assert "记忆指南" in content
 
-    def test_layer_order(self, setup, toolbox):
-        mem, pb = setup
-        mem.remember("用户叫 Zane", pinned=True)
+    def test_profile_before_memory_guidelines(self, setup, toolbox):
+        mem, prompt_builder = setup
+        mem.remember_profile("用户叫 Zane")
         agent = _make_agent(mem, toolbox)
-        state = SessionState(session_id="x", agent=agent, prompt_builder=pb)
+        state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
         content = state.build_messages()[0]["content"]
-        assert content.find("记忆") < content.find("记忆指南")
+        assert content.find("User Profile") < content.find("记忆指南")
 
 
 class TestTools:
     @pytest.mark.asyncio
-    async def test_recall(self, setup, toolbox):
+    async def test_recall_excludes_profile(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        mem.remember("用户喜欢 Python")
-        t = toolbox.get("recall_memory")
-        r = await t.call(query="Python")
-        assert r.success and "Python" in r.content
+        mem.remember_profile("用户叫 Zane")
+        mem.remember_fact("用户喜欢 Python")
+        recall = toolbox.get("recall_memory")
+        result = await recall.call(query="用户")
+        assert result.success
+        assert "Python" in result.content
+        assert "Zane" not in result.content
 
     @pytest.mark.asyncio
-    async def test_remember_pinned(self, setup, toolbox):
+    async def test_remember_profile(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        t = toolbox.get("remember")
-        r = await t.call(content="用户叫 Zane", pinned=True)
-        assert r.success and "已记住" in r.content
-        assert any("Zane" in x["content"] for x in mem.get_pinned())
+        tool = toolbox.get("remember_profile")
+        result = await tool.call(content="用户叫 Zane")
+        assert result.success and "用户画像" in result.content
+        assert any("Zane" in record["content"] for record in mem.get_profile())
 
     @pytest.mark.asyncio
-    async def test_remember_plain(self, setup, toolbox):
+    async def test_remember_fact(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        t = toolbox.get("remember")
-        r = await t.call(content="用户喜欢 Rust")
-        assert r.success
-        assert any("Rust" in x["content"] for x in mem.recall("Rust"))
+        tool = toolbox.get("remember_fact")
+        result = await tool.call(content="用户喜欢 Rust")
+        assert result.success
+        assert any("Rust" in record["content"] for record in mem.recall("Rust"))
 
     @pytest.mark.asyncio
     async def test_schemas(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        names = {s["function"]["name"] for s in toolbox.get_schemas()}
+        names = {schema["function"]["name"] for schema in toolbox.get_schemas()}
         assert "recall_memory" in names
-        assert "remember" in names
+        assert "remember_profile" in names
+        assert "remember_fact" in names
+        assert "remember_project" in names
+        assert "remember_reflection" in names
 
 
 class TestE2E:
     def test_cross_session(self, setup, toolbox):
         mem, _ = setup
-        mem.remember("用户叫 Zane", pinned=True)
-        mem.remember("喜欢 Python")
+        mem.remember_profile("用户叫 Zane")
+        mem.remember_fact("喜欢 Python")
         new_mem = MemoryManager(mem.memory_dir)
-        assert any("Zane" in r["content"] for r in new_mem.get_pinned())
-        assert any("Python" in r["content"] for r in new_mem.recall("Python"))
+        assert any("Zane" in record["content"] for record in new_mem.get_profile())
+        assert any("Python" in record["content"] for record in new_mem.recall("Python"))
 
     @pytest.mark.asyncio
     async def test_discover_then_remember(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
         recall = toolbox.get("recall_memory")
-        remember = toolbox.get("remember")
-        r = await recall.call(query="跑步")
+        remember = toolbox.get("remember_fact")
+        result = await recall.call(query="跑步")
+        assert "未找到" in result.content
         await remember.call(content="用户喜欢跑步")
-        r = await recall.call(query="跑步")
-        assert "跑步" in r.content
+        result = await recall.call(query="跑步")
+        assert "跑步" in result.content

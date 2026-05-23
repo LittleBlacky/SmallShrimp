@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .registry import register_command
@@ -26,7 +26,6 @@ class CommandContext:
             from pathlib import Path
             self._memory_manager = MemoryManager(Path("workspace/memories"))
         return self._memory_manager
-
 @register_command(name="skill", description="加载技能内容", usage="/skill <name>")
 async def cmd_skill(context: CommandContext, args: list[str]) -> str:
     """加载技能命令。"""
@@ -89,16 +88,24 @@ async def cmd_context(context: CommandContext, args: list[str]) -> str:
 async def cmd_remember(context: CommandContext, args: list[str]) -> str:
     """保存记忆。"""
     if not args:
-        return "用法: /remember <内容>\n例如: /remember 用户喜欢用 dark mode"
+        return "用法: /remember [profile|fact|project|reflection] <内容>"
     content = " ".join(args)
-    # 尝试提取 #pinned 标记
-    import re
-    pinned = "#pinned" in content
-    content_clean = re.sub(r"#pinned", "", content).strip()
-
-    record = context.memory.remember(content_clean, pinned=pinned)
-    pin_str = " [画像]" if pinned else ""
-    return f"✓ 已记住{pin_str}: {record['content'][:100]}"
+    layer_aliases = {
+        "profile": "profile",
+        "fact": "facts",
+        "facts": "facts",
+        "project": "projects",
+        "projects": "projects",
+        "reflection": "reflections",
+        "reflections": "reflections",
+    }
+    first = args[0].lower()
+    layer = layer_aliases.get(first, "facts")
+    content_clean = " ".join(args[1:]).strip() if first in layer_aliases else content.strip()
+    if not content_clean:
+        return "用法: /remember [profile|fact|project|reflection] <内容>"
+    record = context.memory.remember(content_clean, layer=layer, source="explicit")
+    return f"✓ 已保存到 {record['layer']}: {record['content'][:100]}"
 
 @register_command(name="recall", description="搜索记忆", usage="/recall <query>")
 async def cmd_recall(context: CommandContext, args: list[str]) -> str:
@@ -117,13 +124,13 @@ async def cmd_recall(context: CommandContext, args: list[str]) -> str:
 @register_command(name="memories", description="查看所有记忆", usage="/memories")
 async def cmd_memories(context: CommandContext, args: list[str]) -> str:
     """列出所有记忆。"""
-    records = context.memory.topics.list_all()
+    records = context.memory.list_all()
     if not records:
         return "还没有任何记忆。使用 /remember <内容> 来添加。"
     lines = [f"共 {len(records)} 条记忆:\n"]
     for r in records:
         date_str = r["created_at"][:10]
-        lines.append(f"  [{date_str}] {r['content'][:60]}...")
+        lines.append(f"  [{date_str}] [{r['layer']}] {r['content'][:60]}...")
     return "\n".join(lines)
 
 @register_command(name="forget", description="删除记忆", usage="/forget <关键词>")
@@ -137,7 +144,7 @@ async def cmd_forget(context: CommandContext, args: list[str]) -> str:
         return f"没有找到匹配 '{query}' 的记忆"
     deleted = 0
     for r in results:
-        if context.memory.topics.delete(r["id"]):
+        if context.memory.delete(r["id"]):
             deleted += 1
     return f"已删除 {deleted} 条记忆"
 
@@ -302,3 +309,4 @@ async def cmd_agents(context: CommandContext, args: list[str]) -> str:
         mark = " (当前)" if (a.id or a.name) == current_id else ""
         lines.append(f"  • `{a.id or a.name}`{mark} - {a.description}")
     return "\n".join(lines)
+

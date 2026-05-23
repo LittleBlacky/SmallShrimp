@@ -59,7 +59,7 @@ class PromptBuilder:
         if state.source is not None:
             layers.append(self._build_channel_hint(state.source))
 
-        # Layer 6: Profile（用户画像）
+        # Layer 6: User Profile（稳定用户画像）
         profile_block = self._build_profile_block(state)
         if profile_block:
             layers.append(profile_block)
@@ -68,11 +68,14 @@ class PromptBuilder:
         if getattr(state.agent, "memory_manager", None):
             layers.append(
                 "## 记忆指南\n\n"
-                "当用户分享关于自己的新信息时，主动使用记忆工具保存。\n"
-                "- remember(content, pinned=True)：保存身份、长期偏好（会始终可见）\n"
-                "- remember(content)：保存可检索的事实、上下文\n"
-                "- recall_memory(query)：检索非 pinned 记忆，pinned 记忆已在对话开头列出\n"
-                "- consolidate_memories：清理记忆库中的重复记录\n"
+                "记忆分为用户画像和任务记忆，两条通道不要混用。\n"
+                "- 用户画像已在本提示的 `User Profile` 中稳定列出，优先相信。\n"
+                "- remember_profile(content)：只保存姓名、长期偏好、沟通语言、明确纠正。\n"
+                "- remember_fact(content)：保存普通跨会话事实。\n"
+                "- remember_project(content)：保存当前项目/仓库上下文。\n"
+                "- remember_reflection(content)：保存失败模式、工具教训、行为反思。\n"
+                "- recall_memory(query)：只检索任务记忆，不检索用户画像。\n"
+                "- consolidate_memories：清理非画像记忆库中的重复记录。\n"
                 "不要保存可从当前上下文推导的临时信息。"
             )
 
@@ -112,16 +115,16 @@ class PromptBuilder:
         return "\n\n".join(parts)
 
     def _build_profile_block(self, state: "SessionState") -> str:
-        """注入 pinned 记忆到 system prompt。"""
+        """注入用户画像到 system prompt。"""
         memory_manager = getattr(state.agent, "memory_manager", None)
         if memory_manager is None:
             return ""
-        pinned = memory_manager.get_pinned()
-        if not pinned:
+        profile = memory_manager.get_profile()
+        if not profile:
             return ""
-        lines = ["## 记忆\n"]
-        for r in pinned:
-            lines.append(f"- [📌] {r['content']}")
+        lines = ["## User Profile\n"]
+        for r in profile:
+            lines.append(f"- {r['content']}")
         return "\n".join(lines)
 
     def _build_channel_hint(self, source: "EventSource") -> str:
