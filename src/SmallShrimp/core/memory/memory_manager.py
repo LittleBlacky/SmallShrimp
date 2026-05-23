@@ -30,6 +30,7 @@ class TopicMemory:
         self.memory_dir = memory_dir / "topics"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.max_entries = max_entries
+        self._write_count = 0
 
     def _load_all(self) -> list[MemoryRecord]:
         if not self.file_path.exists():
@@ -75,6 +76,9 @@ class TopicMemory:
         }
         records.append(record)
         self._evict(records)
+        self._write_count += 1
+        if self._write_count % 50 == 0:
+            self.consolidate()
         self._save_all(records)
         return record
 
@@ -140,6 +144,33 @@ class TopicMemory:
                 to_remove.append(r)
         for r in to_remove:
             records.remove(r)
+
+    def consolidate(self, threshold: float = 0.8) -> int:
+        """扫描所有记忆，合并相似度超过阈值的非 pinned 记录对。返回合并数。"""
+        records = self._load_all()
+        merged = 0
+        # 按 recall_count 降序：优先保留热记录
+        records.sort(key=lambda r: r.get("recall_count", 0), reverse=True)
+        for i in range(len(records)):
+            if records[i].get("pinned"):
+                continue
+            for j in range(i + 1, len(records)):
+                if records[j].get("pinned"):
+                    continue
+                score = _rank_memory(
+                    records[i].get("content", ""),
+                    records[j].get("content", ""),
+                )
+                # 正常化评分到 0~1
+                normalized = score / 19.0
+                if normalized >= threshold:
+                    records[j]["content"] = records[i]["content"]
+                    records[j]["kind"] = records[i].get("kind", records[j].get("kind", ""))
+                    records[j]["updated_at"] = datetime.now().isoformat()
+                    merged += 1
+        if merged:
+            self._save_all(records)
+        return merged
 
 
 class ProjectMemory:

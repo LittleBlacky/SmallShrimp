@@ -72,6 +72,7 @@ class PromptBuilder:
                 "- remember(content, pinned=True)：保存身份、长期偏好（会始终可见）\n"
                 "- remember(content)：保存可检索的事实、上下文\n"
                 "- recall_memory(query)：不确定时先查记忆再回答\n"
+                "- consolidate_memories：清理记忆库中的重复记录\n"
                 "不要保存可从当前上下文推导的临时信息。"
             )
 

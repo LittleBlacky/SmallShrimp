@@ -32,4 +32,11 @@ kind:
 
     tools.append(remember)
 
+    @tool(description="扫描并合并记忆库中的相似记录。当你发现记忆库有多条相近内容时调用此工具清理。不碰 pinned 记录。")
+    async def consolidate_memories(threshold: float = 0.8) -> str:
+        count = memory_manager.topics.consolidate(threshold=threshold)
+        return f"合并了 {count} 对相似记忆。" if count else "没有找到可合并的记忆。"
+
+    tools.append(consolidate_memories)
+
     return tools
