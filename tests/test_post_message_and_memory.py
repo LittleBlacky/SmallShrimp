@@ -94,34 +94,33 @@ def test_agent_loader_discovers_cookie():
 # ── MemoryManager 测试 ──
 
 def test_memory_manager_remember():
-    """MemoryManager.remember 持久化记忆。"""
+    """MemoryManager.remember_fact 持久化记忆。"""
     import tempfile
     from pathlib import Path
-    from src.SmallShrimp.core.memory.memory_manager import TopicMemory
+    from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        topics = TopicMemory(Path(tmpdir))
-        record = topics.store("用户偏好 Python")
-
+        memory = MemoryManager(Path(tmpdir))
+        record = memory.remember_fact("用户偏好 Python")
         assert record["content"] == "用户偏好 Python"
 
 
 def test_memory_manager_search():
-    """MemoryManager search 检索记忆。"""
+    """MemoryManager.recall 检索任务记忆。"""
     import tempfile
     from pathlib import Path
-    from src.SmallShrimp.core.memory.memory_manager import TopicMemory
+    from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        topics = TopicMemory(Path(tmpdir))
-        topics.store("用户偏好 dark mode")
-        topics.store("项目名叫 SmallShrimp")
+        memory = MemoryManager(Path(tmpdir))
+        memory.remember_fact("用户偏好 dark mode")
+        memory.remember_project("项目名叫 SmallShrimp")
 
-        results = topics.search("dark")
+        results = memory.recall("dark")
         assert len(results) >= 1
         assert "dark mode" in results[0]["content"]
 
-        results = topics.search("")
+        results = memory.recall("")
         assert len(results) == 2
 
 
@@ -134,5 +133,5 @@ if __name__ == "__main__":
     test_cookie_agent_loader_loads()
     test_agent_loader_discovers_cookie()
     test_memory_manager_remember()
-    test_memory_manager_recall()
+    test_memory_manager_search()
     print("\nAll Ch14+Ch17 tests passed!")

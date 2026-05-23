@@ -1,232 +1,230 @@
 from __future__ import annotations
-"""Memory Manager - Manages persistent memories across sessions."""
+"""Layered memory manager for persistent profile, facts, reflections, and sessions."""
 import json
 import math
 import re
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import datetime, date
-from typing import TypedDict
+from typing import Iterable, Literal, TypedDict
 
-from ..message import HumanMessage, AssistantMessage, Message
+from ..message import Message
+
+MemoryLayer = Literal["profile", "facts", "projects", "reflections", "sessions"]
+
+VALID_MEMORY_LAYERS: tuple[MemoryLayer, ...] = (
+    "profile",
+    "facts",
+    "projects",
+    "reflections",
+    "sessions",
+)
 
 
 class MemoryRecord(TypedDict, total=False):
-    """记忆记录结构。"""
+    """一条分层记忆记录。"""
     id: str
     content: str
-    pinned: bool
-    kind: str
+    layer: MemoryLayer
+    source: str
+    importance: int
+    confidence: float
     recall_count: int
+    last_recalled_at: str
     created_at: str
     updated_at: str
+    archived: bool
 
 
-class TopicMemory:
-    """记忆存储 - 画像(pinned=True)/偏好/事实/反思，LRU 淘汰。"""
+@dataclass(frozen=True)
+class MemoryLayerSpec:
+    layer: MemoryLayer
+    file_name: str
+    default_importance: int
 
-    def __init__(self, memory_dir: Path, max_entries: int = 2000):
-        self.file_path = memory_dir / "topics" / "topics.jsonl"
-        self.memory_dir = memory_dir / "topics"
-        self.memory_dir.mkdir(parents=True, exist_ok=True)
+
+_LAYER_SPECS: dict[MemoryLayer, MemoryLayerSpec] = {
+    "profile": MemoryLayerSpec("profile", "profile/user.jsonl", 10),
+    "facts": MemoryLayerSpec("facts", "facts/facts.jsonl", 5),
+    "projects": MemoryLayerSpec("projects", "projects/projects.jsonl", 6),
+    "reflections": MemoryLayerSpec("reflections", "reflections/agent.jsonl", 6),
+    "sessions": MemoryLayerSpec("sessions", "sessions/sessions.jsonl", 3),
+}
+
+
+class LayeredMemoryStore:
+    """JSONL-backed store for one explicit memory layer."""
+
+    def __init__(self, root_dir: Path, layer: MemoryLayer, max_entries: int = 2000):
+        self.root_dir = root_dir
+        self.layer = layer
+        self.spec = _LAYER_SPECS[layer]
+        self.file_path = root_dir / self.spec.file_name
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_entries = max_entries
-        self._write_count = 0
 
     def _load_all(self) -> list[MemoryRecord]:
         if not self.file_path.exists():
             return []
-        records = []
-        with open(self.file_path, "r", encoding="utf-8") as f:
-            for line in f:
+        records: list[MemoryRecord] = []
+        with open(self.file_path, "r", encoding="utf-8") as file:
+            for line in file:
                 line = line.strip()
-                if line:
-                    records.append(json.loads(line))
+                if not line:
+                    continue
+                record = _normalize_record(json.loads(line), self.layer, self.spec.default_importance)
+                if not record.get("archived"):
+                    records.append(record)
         return records
 
     def _save_all(self, records: list[MemoryRecord]) -> None:
-        with open(self.file_path, "w", encoding="utf-8") as f:
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.file_path, "w", encoding="utf-8") as file:
             for record in records:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    def store(self, content: str, pinned: bool = False, kind: str = "",
-              dedup_threshold: float = 7.0) -> MemoryRecord:
-        """存储记忆，自动去重。"""
+    def store(self, content: str, *, source: str = "auto", importance: int | None = None,
+              confidence: float = 1.0, dedup_threshold: float = 7.0) -> MemoryRecord:
+        content = content.strip()
+        if not content:
+            raise ValueError("memory content must be non-empty")
+
         records = self._load_all()
+        now = datetime.now().isoformat()
+        importance = self.spec.default_importance if importance is None else _clamp_int(importance, 0, 10)
+        confidence = _clamp_float(confidence, 0.0, 1.0)
 
         for existing in records:
-            score = _rank_memory(content, existing.get("content", ""))
-            if score >= dedup_threshold:
+            if _is_duplicate_memory(content, existing.get("content", ""), dedup_threshold):
                 existing["content"] = content
-                if pinned:
-                    existing["pinned"] = True
-                if kind:
-                    existing["kind"] = kind
-                existing["updated_at"] = datetime.now().isoformat()
+                existing["source"] = source
+                existing["importance"] = max(existing.get("importance", 0), importance)
+                existing["confidence"] = confidence
+                existing["updated_at"] = now
                 self._save_all(records)
                 return existing
 
         record: MemoryRecord = {
-            "id": datetime.now().strftime("%Y%m%d%H%M%S"),
+            "id": _new_memory_id(),
             "content": content,
-            "pinned": pinned,
-            "kind": kind,
+            "layer": self.layer,
+            "source": source,
+            "importance": importance,
+            "confidence": confidence,
             "recall_count": 0,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
+            "created_at": now,
+            "updated_at": now,
+            "archived": False,
         }
         records.append(record)
         self._evict(records)
-        self._write_count += 1
-        if self._write_count % 50 == 0:
-            self.consolidate()
         self._save_all(records)
         return record
 
     def search(self, query: str, limit: int = 10) -> list[MemoryRecord]:
-        """混合词法评分搜索，命中记录自动累加 recall_count。"""
         records = self._load_all()
         scored: list[tuple[float, MemoryRecord]] = []
-        for r in records:
-            score = _rank_memory(query, r.get("content", ""))
-            if score > 0 or not query:
-                scored.append((score, r))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        result = [r for _, r in scored[:limit]]
+        for record in records:
+            score = _rank_memory(query, record.get("content", ""))
+            if score >= 1.0 or not query:
+                scored.append((score + _memory_quality_boost(record), record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        result = [record for _, record in scored[:limit]]
 
-        # 命中计次：更新 recall_count 并回写
         if result and query:
-            for r in result:
-                r["recall_count"] = r.get("recall_count", 0) + 1
+            now = datetime.now().isoformat()
+            recalled_ids = {record["id"] for record in result}
+            for record in records:
+                if record.get("id") in recalled_ids:
+                    record["recall_count"] = record.get("recall_count", 0) + 1
+                    record["last_recalled_at"] = now
             self._save_all(records)
-
         return result
 
-    def update(self, record_id: str, content: str | None = None) -> MemoryRecord | None:
-        """更新记忆。"""
+    def list_all(self) -> list[MemoryRecord]:
         records = self._load_all()
-        for record in records:
-            if record["id"] == record_id:
-                if content is not None:
-                    record["content"] = content
-                record["updated_at"] = datetime.now().isoformat()
-                self._save_all(records)
-                return record
-        return None
+        records.sort(key=lambda record: (record.get("importance", 0), record.get("updated_at", "")), reverse=True)
+        return records
 
     def delete(self, record_id: str) -> bool:
-        """删除记忆。"""
         records = self._load_all()
-        original_len = len(records)
-        records = [r for r in records if r["id"] != record_id]
-        if len(records) < original_len:
-            self._save_all(records)
-            return True
-        return False
+        kept = [record for record in records if record.get("id") != record_id]
+        if len(kept) == len(records):
+            return False
+        self._save_all(kept)
+        return True
 
-    def list_all(self) -> list[MemoryRecord]:
-        """列出所有记忆。"""
-        return self._load_all()
+    def consolidate(self, threshold: float = 0.8) -> int:
+        records = self._load_all()
+        records.sort(key=lambda record: (record.get("importance", 0), record.get("recall_count", 0)), reverse=True)
+        removed: set[str] = set()
+        merged = 0
+        for i, left in enumerate(records):
+            if left["id"] in removed:
+                continue
+            for right in records[i + 1:]:
+                if right["id"] in removed:
+                    continue
+                similarity = SequenceMatcher(None, left.get("content", ""), right.get("content", "")).ratio()
+                if similarity >= threshold:
+                    left["importance"] = max(left.get("importance", 0), right.get("importance", 0))
+                    left["recall_count"] = left.get("recall_count", 0) + right.get("recall_count", 0)
+                    left["updated_at"] = datetime.now().isoformat()
+                    removed.add(right["id"])
+                    merged += 1
+        if merged:
+            self._save_all([record for record in records if record["id"] not in removed])
+        return merged
 
     def _evict(self, records: list[MemoryRecord]) -> None:
-        """超出容量时淘汰 recall_count 最低的非 pinned 记录。"""
         over = len(records) - self.max_entries
         if over <= 0:
             return
-        records.sort(key=lambda r: (
-            r.get("recall_count", 0),
-            r.get("created_at", ""),
+        records.sort(key=lambda record: (
+            record.get("importance", 0),
+            record.get("recall_count", 0),
+            record.get("created_at", ""),
         ))
-        to_remove = []
-        for r in records:
-            if len(to_remove) >= over:
-                break
-            if not r.get("pinned"):
-                to_remove.append(r)
-        for r in to_remove:
-            records.remove(r)
-
-    def consolidate(self, threshold: float = 0.8) -> int:
-        """扫描所有记忆，合并相似度超过阈值的非 pinned 记录对。返回合并数。"""
-        records = self._load_all()
-        merged = 0
-        # 按 recall_count 降序：优先保留热记录
-        records.sort(key=lambda r: r.get("recall_count", 0), reverse=True)
-        for i in range(len(records)):
-            if records[i].get("pinned"):
-                continue
-            for j in range(i + 1, len(records)):
-                if records[j].get("pinned"):
-                    continue
-                score = _rank_memory(
-                    records[i].get("content", ""),
-                    records[j].get("content", ""),
-                )
-                # 正常化评分到 0~1
-                normalized = score / 19.0
-                if normalized >= threshold:
-                    records[j]["content"] = records[i]["content"]
-                    records[j]["kind"] = records[i].get("kind", records[j].get("kind", ""))
-                    records[j]["updated_at"] = datetime.now().isoformat()
-                    merged += 1
-        if merged:
-            self._save_all(records)
-        return merged
+        del records[:over]
 
 
 class ProjectMemory:
-    """项目记忆 - 按项目存储上下文。"""
+    """项目上下文文件存储，保留现有 key/value API。"""
 
     def __init__(self, memory_dir: Path):
-        self.memory_dir = memory_dir / "projects"
+        self.memory_dir = memory_dir / "project-state"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
     def _project_file(self, project_id: str) -> Path:
-        """获取项目文件路径。"""
-        safe_id = re.sub(r'[^\w\-.]', '_', project_id)
+        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id)
         return self.memory_dir / f"{safe_id}.json"
 
     def save_project(self, project_id: str, data: dict) -> None:
-        """保存项目数据。"""
         file_path = self._project_file(project_id)
-        data["updated_at"] = datetime.now().isoformat()
-        file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with open(file_path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
 
     def load_project(self, project_id: str) -> dict | None:
-        """加载项目数据。"""
         file_path = self._project_file(project_id)
         if not file_path.exists():
             return None
-        try:
-            return json.loads(file_path.read_text(encoding="utf-8"))
-        except Exception:
-            return None
+        with open(file_path, "r", encoding="utf-8") as file:
+            return json.load(file)
 
     def list_projects(self) -> list[dict]:
-        """列出所有项目。"""
         projects = []
-        for f in self.memory_dir.glob("*.json"):
+        for file_path in self.memory_dir.glob("*.json"):
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                projects.append({
-                    "id": data.get("id", f.stem),
-                    "name": data.get("name", f.stem),
-                    "updated_at": data.get("updated_at", ""),
-                })
+                with open(file_path, "r", encoding="utf-8") as file:
+                    projects.append(json.load(file))
             except Exception:
-                projects.append({"id": f.stem, "name": f.stem, "updated_at": ""})
-        return sorted(projects, key=lambda p: p["updated_at"], reverse=True)
-
-    def delete_project(self, project_id: str) -> bool:
-        """删除项目。"""
-        file_path = self._project_file(project_id)
-        if file_path.exists():
-            file_path.unlink()
-            return True
-        return False
+                continue
+        return projects
 
 
 class DailyNotes:
-    """日常笔记 - 按日期记录。"""
+    """每日笔记。"""
 
     def __init__(self, memory_dir: Path):
         self.daily_dir = memory_dir / "daily-notes"
@@ -238,81 +236,127 @@ class DailyNotes:
         return self.daily_dir / f"{note_date.strftime('%Y-%m-%d')}.md"
 
     def write_note(self, content: str, note_date: date | None = None) -> None:
-        """写入笔记（追加模式）。"""
         file_path = self._note_file(note_date)
         timestamp = datetime.now().strftime("%H:%M:%S")
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(f"\n## [{timestamp}]\n\n{content}\n")
+        with open(file_path, "a", encoding="utf-8") as file:
+            file.write(f"\n## [{timestamp}]\n\n{content}\n")
 
     def read_note(self, note_date: date | None = None) -> str:
-        """读取笔记。"""
         file_path = self._note_file(note_date)
         if not file_path.exists():
             return ""
         return file_path.read_text(encoding="utf-8")
 
     def list_notes(self, limit: int = 30) -> list[dict]:
-        """列出最近的笔记。"""
         notes = []
-        for f in sorted(self.daily_dir.glob("*.md"), reverse=True)[:limit]:
-            notes.append({
-                "date": f.stem,
-                "size": f.stat().st_size,
-            })
+        for file_path in sorted(self.daily_dir.glob("*.md"), reverse=True)[:limit]:
+            notes.append({"date": file_path.stem, "size": file_path.stat().st_size})
         return notes
 
 
 class MemoryManager:
-    """统一记忆管理器，整合 Topic、Project、DailyNotes。"""
+    """统一分层记忆管理器。"""
 
     def __init__(self, memory_dir: Path | None = None):
         if memory_dir is None:
             memory_dir = Path("workspace/memories")
         self.memory_dir = Path(memory_dir)
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-
-        self.topics = TopicMemory(self.memory_dir)
+        self.stores = {
+            layer: LayeredMemoryStore(self.memory_dir, layer)
+            for layer in VALID_MEMORY_LAYERS
+        }
+        self.profile = self.stores["profile"]
+        self.facts = self.stores["facts"]
+        self.project_memories = self.stores["projects"]
+        self.reflections = self.stores["reflections"]
+        self.sessions = self.stores["sessions"]
         self.projects = ProjectMemory(self.memory_dir)
         self.daily = DailyNotes(self.memory_dir)
 
-    def recall(self, query: str, limit: int = 5) -> list[MemoryRecord]:
-        """从记忆库中检索相关内容。"""
-        return self.topics.search(query, limit=limit)
+    def remember_profile(self, content: str, *, source: str = "explicit",
+                         importance: int = 10, confidence: float = 1.0) -> MemoryRecord:
+        return self.profile.store(content, source=source, importance=importance, confidence=confidence)
 
-    def remember(self, content: str, pinned: bool = False, kind: str = "") -> MemoryRecord:
-        """存储记忆。pinned=True 为画像，kind: preference/fact/reflection。"""
-        return self.topics.store(content, pinned=pinned, kind=kind)
+    def remember_fact(self, content: str, *, source: str = "auto",
+                      importance: int = 5, confidence: float = 1.0) -> MemoryRecord:
+        return self.facts.store(content, source=source, importance=importance, confidence=confidence)
 
-    def project_update(self, project_id: str, key: str, value: any) -> None:
-        """更新项目上下文。"""
+    def remember_project(self, content: str, *, source: str = "auto",
+                         importance: int = 6, confidence: float = 1.0) -> MemoryRecord:
+        return self.project_memories.store(content, source=source, importance=importance, confidence=confidence)
+
+    def remember_reflection(self, content: str, *, source: str = "auto",
+                            importance: int = 6, confidence: float = 1.0) -> MemoryRecord:
+        return self.reflections.store(content, source=source, importance=importance, confidence=confidence)
+
+    def remember_session(self, content: str, *, source: str = "auto",
+                         importance: int = 3, confidence: float = 1.0) -> MemoryRecord:
+        return self.sessions.store(content, source=source, importance=importance, confidence=confidence)
+
+    def remember(self, content: str, *, layer: str = "facts", source: str = "auto",
+                 importance: int | None = None, confidence: float = 1.0) -> MemoryRecord:
+        memory_layer = _normalize_layer(layer)
+        return self.stores[memory_layer].store(
+            content,
+            source=source,
+            importance=importance,
+            confidence=confidence,
+        )
+
+    def recall(self, query: str, limit: int = 5,
+               layers: Iterable[str] | None = None) -> list[MemoryRecord]:
+        search_layers = [_normalize_layer(layer) for layer in layers] if layers else ["facts", "projects", "reflections"]
+        scored: list[tuple[float, MemoryRecord]] = []
+        for layer in search_layers:
+            for record in self.stores[layer].search(query, limit=limit):
+                scored.append((_rank_memory(query, record.get("content", "")) + _memory_quality_boost(record), record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [record for _, record in scored[:limit]]
+
+    def recall_profile(self, query: str = "", limit: int = 10) -> list[MemoryRecord]:
+        return self.profile.search(query, limit=limit)
+
+    def get_profile(self, limit: int = 20) -> list[MemoryRecord]:
+        return self.profile.list_all()[:limit]
+
+    def list_all(self, layers: Iterable[str] | None = None) -> list[MemoryRecord]:
+        selected_layers = [_normalize_layer(layer) for layer in layers] if layers else list(VALID_MEMORY_LAYERS)
+        records: list[MemoryRecord] = []
+        for layer in selected_layers:
+            records.extend(self.stores[layer].list_all())
+        records.sort(key=lambda record: (record.get("layer", ""), record.get("updated_at", "")), reverse=True)
+        return records
+
+    def delete(self, record_id: str, layers: Iterable[str] | None = None) -> bool:
+        selected_layers = [_normalize_layer(layer) for layer in layers] if layers else list(VALID_MEMORY_LAYERS)
+        for layer in selected_layers:
+            if self.stores[layer].delete(record_id):
+                return True
+        return False
+
+    def consolidate(self, layers: Iterable[str] | None = None, threshold: float = 0.8) -> int:
+        selected_layers = [_normalize_layer(layer) for layer in layers] if layers else ["facts", "projects", "reflections", "sessions"]
+        return sum(self.stores[layer].consolidate(threshold=threshold) for layer in selected_layers)
+
+    def project_update(self, project_id: str, key: str, value: object) -> None:
         project = self.projects.load_project(project_id) or {"id": project_id, "name": project_id}
         project[key] = value
         self.projects.save_project(project_id, project)
 
     def today_note(self, content: str) -> None:
-        """写入今日笔记。"""
         self.daily.write_note(content)
 
-    def get_pinned(self) -> list[MemoryRecord]:
-        """获取 pinned 记忆（用于 system prompt）。"""
-        return [r for r in self.topics.list_all() if r.get("pinned")]
-
     def inject_memories(self, messages: list[Message], query: str | None = None, max_records: int = 5) -> list[Message]:
-        """将相关记忆注入消息列表前端。"""
-        if query:
-            records = self.recall(query, limit=max_records)
-        else:
-            records = self.topics.list_all()[:max_records]
-
+        records = self.recall(query or "", limit=max_records)
         if not records:
             return messages
 
-        memory_lines = ["## 相关记忆\n"]
-        for r in records:
-            memory_lines.append(f"- {r['content']}")
+        memory_lines = ["## Relevant Retrieved Memory\n"]
+        for record in records:
+            memory_lines.append(f"- [{record['layer']}] {record['content']}")
         memory_content = "\n".join(memory_lines)
 
-        # 插入到 system message 之后
         from ..message import SystemMessage
         memory_msg = SystemMessage(content=memory_content)
         result = [messages[0], memory_msg] if messages else [memory_msg]
@@ -320,48 +364,116 @@ class MemoryManager:
         return result
 
 
-# ── Hybrid Lexical Ranking (aligned with ZLAgent) ──────────
+# ── Helpers ──────────────────────────────────────────────
+
+def _normalize_layer(layer: str | None) -> MemoryLayer:
+    normalized = (layer or "facts").strip().lower().replace("-", "_")
+    aliases = {
+        "fact": "facts",
+        "user_fact": "facts",
+        "project": "projects",
+        "reflection": "reflections",
+        "agent_note": "reflections",
+        "session": "sessions",
+        "profile": "profile",
+        "user_profile": "profile",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in VALID_MEMORY_LAYERS else "facts"
+
+
+def _normalize_record(record: dict, layer: MemoryLayer, default_importance: int) -> MemoryRecord:
+    now = datetime.now().isoformat()
+    return {
+        "id": str(record.get("id") or _new_memory_id()),
+        "content": str(record.get("content", "")),
+        "layer": layer,
+        "source": str(record.get("source", "auto")),
+        "importance": _clamp_int(int(record.get("importance", default_importance)), 0, 10),
+        "confidence": _clamp_float(float(record.get("confidence", 1.0)), 0.0, 1.0),
+        "recall_count": int(record.get("recall_count", 0)),
+        "created_at": str(record.get("created_at", now)),
+        "updated_at": str(record.get("updated_at", record.get("created_at", now))),
+        "archived": bool(record.get("archived", False)),
+        **({"last_recalled_at": str(record["last_recalled_at"])} if record.get("last_recalled_at") else {}),
+    }
+
+
+def _new_memory_id() -> str:
+    return datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+
+def _clamp_int(value: int, lower: int, upper: int) -> int:
+    return max(lower, min(upper, value))
+
+
+def _clamp_float(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _memory_quality_boost(record: MemoryRecord) -> float:
+    importance = record.get("importance", 0) / 10
+    confidence = record.get("confidence", 0.0)
+    recall_count = math.log1p(record.get("recall_count", 0)) / 10
+    return importance + confidence + recall_count
+
+
+def _is_duplicate_memory(left: str, right: str, rank_threshold: float = 7.0) -> bool:
+    left_clean = left.strip().lower()
+    right_clean = right.strip().lower()
+    if not left_clean or not right_clean:
+        return False
+    if left_clean == right_clean:
+        return True
+    shorter, longer = sorted((left_clean, right_clean), key=len)
+    if len(shorter) >= 4 and shorter in longer:
+        return True
+    if _has_conflicting_number_suffix(left_clean, right_clean):
+        return False
+    return _rank_memory(left_clean, right_clean) >= rank_threshold and SequenceMatcher(None, left_clean, right_clean).ratio() >= 0.92
+
+
+def _has_conflicting_number_suffix(left: str, right: str) -> bool:
+    left_match = re.search(r"\d+$", left)
+    right_match = re.search(r"\d+$", right)
+    return bool(left_match and right_match and left_match.group() != right_match.group())
+
+
+# ── Hybrid Lexical Ranking ───────────────────────────────
 
 def _char_ngrams(text: str, n: int = 2) -> set[str]:
-    """字符 n-gram 集合，用于中英文混合匹配。"""
     clean = text.lower().strip()
     return {clean[i:i+n] for i in range(len(clean) - n + 1)}
 
+
 def _word_terms(text: str) -> set[str]:
-    """单词/词组分词（支持中英文混合）。"""
-    # CJK 单字作为 term
     cjk = set(re.findall(r'[\u4e00-\u9fff]', text))
-    # ASCII 单词（>=2 字符）
-    ascii_words = set(w.lower() for w in re.findall(r'[a-zA-Z]{2,}', text))
+    ascii_words = set(word.lower() for word in re.findall(r'[a-zA-Z]{2,}', text))
     return cjk | ascii_words
 
+
 def _rank_memory(query: str, content: str) -> float:
-    """混合词法评分：子串 + 词重叠 + n-gram + 序列相似度。"""
     if not query or not content:
         return 0.0
 
-    q = query.lower().strip()
-    c = content.lower().strip()
+    query_text = query.lower().strip()
+    content_text = content.lower().strip()
     score = 0.0
 
-    # 1. 精确子串匹配（最高权重，等同 ZLAgent 的 +8.0）
-    if q in c:
+    if query_text in content_text:
         score += 8.0
 
-    # 2. 词重叠
-    q_terms = _word_terms(q)
-    c_terms = _word_terms(c)
-    if q_terms:
-        score += 4.0 * (len(q_terms & c_terms) / len(q_terms))
+    query_terms = _word_terms(query_text)
+    content_terms = _word_terms(content_text)
+    if query_terms:
+        score += 4.0 * (len(query_terms & content_terms) / len(query_terms))
 
-    # 3. 字符 n-gram
-    q_grams = _char_ngrams(q)
-    c_grams = _char_ngrams(c)
-    if q_grams:
-        score += 3.0 * (len(q_grams & c_grams) / len(q_grams))
+    query_grams = _char_ngrams(query_text)
+    content_grams = _char_ngrams(content_text)
+    if query_grams:
+        score += 3.0 * (len(query_grams & content_grams) / len(query_grams))
 
-    # 4. 序列相似度
-    ratio = SequenceMatcher(None, q, c).ratio()
+    ratio = SequenceMatcher(None, query_text, content_text).ratio()
     if ratio >= 0.12:
         score += 2.0 * ratio
 

@@ -1,182 +1,93 @@
 from __future__ import annotations
-"""Memory Manager 测试。"""
+"""Layered Memory Manager 测试。"""
 import tempfile
 from pathlib import Path
+
 from src.SmallShrimp.core.memory import MemoryManager
+from src.SmallShrimp.core.memory.memory_manager import LayeredMemoryStore, ProjectMemory, _rank_memory
+from src.SmallShrimp.core.message import HumanMessage, SystemMessage
 
 
 def test_memory_manager_init():
-    """测试记忆管理器初始化。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
         assert manager.memory_dir.exists()
-        assert manager.topics.memory_dir.exists()
-        assert manager.projects.memory_dir.exists()
-        assert manager.daily.daily_dir.exists()
+        assert manager.profile.file_path.parent.exists()
+        assert manager.facts.file_path.parent.exists()
+        assert manager.project_memories.file_path.parent.exists()
+        assert manager.reflections.file_path.parent.exists()
+        assert manager.sessions.file_path.parent.exists()
 
 
-def test_topic_memory_store_and_search():
-    """测试主题记忆存储和搜索。"""
+def test_layered_store_dedup_search_delete():
     with tempfile.TemporaryDirectory() as tmpdir:
-        from src.SmallShrimp.core.memory.memory_manager import TopicMemory
-        topics = TopicMemory(Path(tmpdir))
+        store = LayeredMemoryStore(Path(tmpdir), "facts")
+        first = store.store("用户喜欢 Python 编程")
+        second = store.store("用户喜欢 Python 编程")
+        assert second["id"] == first["id"]
+        assert len(store.list_all()) == 1
 
-        # 存储记忆
-        record1 = topics.store("用户喜欢 Python 编程")
-        assert record1["content"] == "用户喜欢 Python 编程"
+        results = store.search("Python")
+        assert len(results) == 1
+        assert store.list_all()[0]["recall_count"] == 1
 
-        record2 = topics.store("项目使用 FastAPI 框架")
-        assert record2.get("recall_count", 0) == 0
-
-        # 搜索
-        results = topics.search("Python")
-        assert len(results) >= 1
-
-        # 空搜索
-        results = topics.search("")
-        assert len(results) >= 2
+        assert store.delete(first["id"]) is True
+        assert store.search("", limit=20) == []
 
 
-def test_topic_memory_update_and_delete():
-    """测试主题记忆更新和删除。"""
+def test_profile_is_separate_from_recall():
     with tempfile.TemporaryDirectory() as tmpdir:
-        from src.SmallShrimp.core.memory.memory_manager import TopicMemory
-        topics = TopicMemory(Path(tmpdir))
+        manager = MemoryManager(Path(tmpdir))
+        manager.remember_profile("用户叫 Zane")
+        manager.remember_fact("用户喜欢 Python")
 
-        record = topics.store("原始内容")
-        record_id = record["id"]
-
-        # 更新
-        updated = topics.update(record_id, content="更新后内容")
-        assert updated is not None
-        assert updated["content"] == "更新后内容"
-
-        # 删除
-        assert topics.delete(record_id) is True
-        assert topics.search("", limit=20) == []
+        profile = manager.get_profile()
+        assert any("Zane" in record["content"] for record in profile)
+        assert not any("Zane" in record["content"] for record in manager.recall("Zane"))
+        assert any("Python" in record["content"] for record in manager.recall("Python"))
 
 
-def test_project_memory():
-    """测试项目记忆。"""
+def test_remember_routes_to_layers():
     with tempfile.TemporaryDirectory() as tmpdir:
-        from src.SmallShrimp.core.memory.memory_manager import ProjectMemory
+        manager = MemoryManager(Path(tmpdir))
+        assert manager.remember("长期偏好中文", layer="profile")["layer"] == "profile"
+        assert manager.remember_fact("普通事实")["layer"] == "facts"
+        assert manager.remember_project("项目使用 pytest")["layer"] == "projects"
+        assert manager.remember_reflection("失败后先读测试")["layer"] == "reflections"
+        assert manager.remember_session("本轮临时状态")["layer"] == "sessions"
+
+
+def test_project_memory_state_api():
+    with tempfile.TemporaryDirectory() as tmpdir:
         projects = ProjectMemory(Path(tmpdir))
-
-        # 保存项目
-        projects.save_project("test-project", {
-            "id": "test-project",
-            "name": "Test Project",
-            "language": "Python",
-        })
-
-        # 加载项目
-        data = projects.load_project("test-project")
-        assert data is not None
-        assert data["language"] == "Python"
-
-        # 列出项目
-        project_list = projects.list_projects()
-        assert len(project_list) >= 1
-
-        # 删除项目
-        assert projects.delete_project("test-project") is True
-        assert projects.load_project("test-project") is None
+        projects.save_project("test-project", {"id": "test-project", "language": "Python"})
+        assert projects.load_project("test-project")["language"] == "Python"
+        assert len(projects.list_projects()) == 1
 
 
-def test_daily_notes():
-    """测试日常笔记。"""
-    import datetime
-    with tempfile.TemporaryDirectory() as tmpdir:
-        from src.SmallShrimp.core.memory.memory_manager import DailyNotes
-        daily = DailyNotes(Path(tmpdir))
-
-        # 写入笔记
-        daily.write_note("今天完成了内存模块的开发")
-
-        # 读取笔记
-        content = daily.read_note()
-        assert "今天完成了内存模块的开发" in content
-
-        # 列出笔记
-        notes = daily.list_notes()
-        assert len(notes) >= 1
-
-
-def test_memory_recall():
-    """测试统一检索接口。"""
+def test_daily_notes_and_project_update():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
-
-        manager.remember("用户偏好使用 dark mode")
-
-        results = manager.recall("dark mode")
-        assert len(results) >= 1
-        assert "dark mode" in results[0]["content"]
+        manager.project_update("smallshrimp", "language", "Python")
+        assert manager.projects.load_project("smallshrimp")["language"] == "Python"
+        manager.today_note("完成分层记忆重构")
+        assert "完成分层记忆重构" in manager.daily.read_note()
 
 
-def test_memory_remember():
-    """测试统一存储接口。"""
+def test_inject_memories_excludes_profile():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
+        manager.remember_profile("用户叫 Zane")
+        manager.remember_fact("用户使用 DeepSeek API")
+        messages = [SystemMessage(content="You are an assistant."), HumanMessage(content="Hello")]
 
-        record = manager.remember("这是一个重要的事实")
-        assert record["content"] == "这是一个重要的事实"
-
-
-def test_project_update():
-    """测试项目上下文更新。"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manager = MemoryManager(Path(tmpdir))
-
-        manager.project_update("my-project", "status", "进行中")
-        manager.project_update("my-project", "language", "Python")
-
-        data = manager.projects.load_project("my-project")
-        assert data["status"] == "进行中"
-        assert data["language"] == "Python"
-
-
-def test_today_note():
-    """测试今日笔记。"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manager = MemoryManager(Path(tmpdir))
-
-        manager.today_note("测试笔记内容")
-
-        content = manager.daily.read_note()
-        assert "测试笔记内容" in content
-
-
-def test_inject_memories():
-    """测试记忆注入消息列表。"""
-    from src.SmallShrimp.core.message import SystemMessage, HumanMessage
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manager = MemoryManager(Path(tmpdir))
-
-        # 存储记忆
-        manager.remember("用户使用 DeepSeek API")
-
-        # 构建消息列表
-        messages = [
-            SystemMessage(content="You are an assistant."),
-            HumanMessage(content="Hello"),
-        ]
-
-        # 注入记忆
         injected = manager.inject_memories(messages, query="DeepSeek")
-        assert len(injected) == 3  # system + memory + human
-        assert "相关记忆" in injected[1].content
+        assert len(injected) == 3
+        assert "Relevant Retrieved Memory" in injected[1].content
+        assert "DeepSeek" in injected[1].content
+        assert "Zane" not in injected[1].content
 
 
-if __name__ == "__main__":
-    test_memory_manager_init()
-    test_topic_memory_store_and_search()
-    test_topic_memory_update_and_delete()
-    test_project_memory()
-    test_daily_notes()
-    test_memory_recall()
-    test_memory_remember()
-    test_project_update()
-    test_today_note()
-    test_inject_memories()
-    print("\nAll test_memory tests passed!")
+def test_memory_ranking():
+    assert _rank_memory("dark mode", "dark mode preference") > 7.0
+    assert _rank_memory("端口配置", "用户喜欢 Python 3.11") < 2.0
