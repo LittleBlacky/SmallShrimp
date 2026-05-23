@@ -71,7 +71,7 @@ class PromptBuilder:
                 "当用户分享关于自己的新信息时，主动使用记忆工具保存。\n"
                 "- remember(content, pinned=True)：保存身份、长期偏好（会始终可见）\n"
                 "- remember(content)：保存可检索的事实、上下文\n"
-                "- recall_memory(query)：不确定时先查记忆再回答\n"
+                "- recall_memory(query)：检索非 pinned 记忆，pinned 记忆已在对话开头列出\n"
                 "- consolidate_memories：清理记忆库中的重复记录\n"
                 "不要保存可从当前上下文推导的临时信息。"
             )
@@ -121,7 +121,7 @@ class PromptBuilder:
             return ""
         lines = ["## 记忆\n"]
         for r in pinned:
-            lines.append(f"- {r['content']}")
+            lines.append(f"- [📌] {r['content']}")
         return "\n".join(lines)
 
     def _build_channel_hint(self, source: "EventSource") -> str:
