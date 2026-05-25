@@ -62,20 +62,18 @@ async def cmd_help(context: CommandContext, args: list[str]) -> str:
 async def cmd_compact(context: CommandContext, args: list[str]) -> str:
     """手动压缩上下文命令。"""
     guard = context.session.agent.context_guard
-    token_count = guard.estimate_tokens(context.session.state)
+    before_tokens = guard.estimate_tokens(context.session.state)
+    before_messages = len(context.session.state.messages)
 
-    # 先尝试截断
-    context.session.state.messages = guard._truncate_large_tool_results(context.session.state.messages)
+    context.session.state = await guard.check_and_compact(context.session.state)
 
-    # 检查是否需要进一步压缩
-    new_token_count = guard.estimate_tokens(context.session.state)
-    if new_token_count < guard.token_threshold:
-        return f"已截断大工具结果。当前 tokens: {new_token_count} / {guard.token_threshold}"
-
-    # 需要总结
-    context.session.state = await guard._compact_messages(context.session.state)
-    final_count = guard.estimate_tokens(context.session.state)
-    return f"✓ 上下文已压缩。当前 tokens: {final_count} / {guard.token_threshold}，保留 {len(context.session.state.messages)} 条消息。"
+    after_tokens = guard.estimate_tokens(context.session.state)
+    after_messages = len(context.session.state.messages)
+    return (
+        "✓ 上下文已检查/压缩。"
+        f"tokens: {before_tokens} -> {after_tokens} / {guard.token_threshold}，"
+        f"messages: {before_messages} -> {after_messages}。"
+    )
 
 @register_command(name="context", description="查看上下文使用情况", usage="/context")
 async def cmd_context(context: CommandContext, args: list[str]) -> str:

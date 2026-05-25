@@ -1,5 +1,8 @@
 from __future__ import annotations
 """命令注册表测试。"""
+import asyncio
+from types import SimpleNamespace
+
 from src.SmallShrimp.core.commands.registry import CommandRegistry, register_command
 from src.SmallShrimp.core.commands.base import Command
 
@@ -150,6 +153,43 @@ def test_command_registry_dispatch():
     assert result == "dispatched: ['arg1', 'arg2']"
 
 
+def test_cmd_compact_uses_context_guard_pipeline():
+    """测试 /compact 走当前 ContextGuard 统一压缩入口。"""
+    from src.SmallShrimp.core.commands.handlers import CommandContext, cmd_compact
+    from src.SmallShrimp.core.message import HumanMessage
+
+    class FakeGuard:
+        token_threshold = 100
+
+        def __init__(self):
+            self.calls = 0
+
+        def estimate_tokens(self, state):
+            return 120 if self.calls == 0 else 40
+
+        async def check_and_compact(self, state):
+            self.calls += 1
+            state.messages = state.messages[:1]
+            return state
+
+    guard = FakeGuard()
+    state = SimpleNamespace(messages=[
+        HumanMessage(content="first"),
+        HumanMessage(content="second"),
+    ])
+    session = SimpleNamespace(
+        state=state,
+        agent=SimpleNamespace(context_guard=guard),
+    )
+    context = CommandContext(session=session)
+
+    result = asyncio.run(cmd_compact(context, []))
+
+    assert guard.calls == 1
+    assert "tokens: 120 -> 40 / 100" in result
+    assert "messages: 2 -> 1" in result
+
+
 if __name__ == "__main__":
     setup_module()
 
@@ -159,5 +199,6 @@ if __name__ == "__main__":
     test_command_registry_parse()
     test_register_command_decorator()
     test_command_registry_dispatch()
+    test_cmd_compact_uses_context_guard_pipeline()
 
     print("\nAll test_commands tests passed!")
