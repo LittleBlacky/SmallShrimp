@@ -356,8 +356,9 @@ class AgentSession:
             except Exception:
                 pass
 
+        budgeted_result = self.state.budget_tool_result(name, result)
         self.state.add_message(ToolMessage(
-            content=result,
+            content=budgeted_result,
             tool_call_id=tc["id"],
             name=name,
         ))

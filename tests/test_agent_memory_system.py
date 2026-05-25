@@ -18,6 +18,7 @@ from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
 from src.SmallShrimp.core.prompt_builder import PromptBuilder
 from src.SmallShrimp.core.session_state import SessionState
+from src.SmallShrimp.tools.decorators import tool
 from src.SmallShrimp.tools.memory_tool import create_memory_tools
 from src.SmallShrimp.tools.registry import ToolRegistry
 
@@ -210,4 +211,45 @@ async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
     assert tool_messages[1].content == "未找到相关任务记忆。"
     assert len(session.state.surfaced_memory_ids) == 1
     assert session.state.session_memory_bytes > 0
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_budgets_tool_results_across_session(workspace_tmp):
+    workspace = workspace_tmp
+    memory = MemoryManager(workspace / "memories")
+    llm = FakeDeepSeekLLM([
+        {
+            "content": "",
+            "tool_calls": [
+                _tool_call("call-large-1", "large_output", {}),
+                _tool_call("call-large-2", "large_output", {}),
+            ],
+            "finish_reason": "tool_calls",
+            "reasoning_content": "需要读取大输出。",
+            "should_store_reasoning": False,
+        },
+        {"content": "已处理。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+    ])
+    session = _make_session(memory, llm, workspace)
+    session.state.max_session_tool_result_bytes = 1000
+
+    @tool(description="Return a large test payload.")
+    async def large_output() -> str:
+        return "x" * 2000
+
+    session.agent.tool_registry.register(large_output)
+
+    answer = await session.chat("读取大输出")
+    assert answer == "已处理。"
+
+    tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "large_output"]
+    assert len(tool_messages) == 2
+    assert "tool result budgeted" in tool_messages[0].content
+    assert "result omitted" in tool_messages[1].content
+    assert session.state.session_tool_result_bytes == session.state.max_session_tool_result_bytes
+
+    second_call_messages = llm.calls[1]["messages"]
+    tool_payloads = [message["content"] for message in second_call_messages if message.get("name") == "large_output"]
+    assert "tool result budgeted" in tool_payloads[0]
+    assert "result omitted" in tool_payloads[1]
 

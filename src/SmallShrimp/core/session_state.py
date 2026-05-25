@@ -14,6 +14,18 @@ from datetime import datetime
 
 from ..core.message import Message, HumanMessage, AssistantMessage, SystemMessage
 
+
+def _clip_utf8(text: str, max_bytes: int, *, from_end: bool = False) -> str:
+    """按 UTF-8 字节数裁剪文本，避免截断多字节字符。"""
+    if max_bytes <= 0:
+        return ""
+    data = text.encode("utf-8")
+    if len(data) <= max_bytes:
+        return text
+    clipped = data[-max_bytes:] if from_end else data[:max_bytes]
+    return clipped.decode("utf-8", errors="ignore")
+
+
 @dataclass
 class SessionState:
 
@@ -28,6 +40,8 @@ class SessionState:
     surfaced_memory_ids: set[str] = field(default_factory=set)
     session_memory_bytes: int = 0
     max_session_memory_bytes: int = 60 * 1024
+    session_tool_result_bytes: int = 0
+    max_session_tool_result_bytes: int = 256 * 1024
 
     def filter_new_memories(self, records: list[dict]) -> list[dict]:
         """按本会话记忆预算筛选尚未展示过的记忆。"""
@@ -56,6 +70,39 @@ class SessionState:
             if memory_id:
                 self.surfaced_memory_ids.add(memory_id)
             self.session_memory_bytes += len(str(record.get("content", "")).encode("utf-8"))
+
+    def budget_tool_result(self, tool_name: str, content: str) -> str:
+        """按本会话工具结果预算裁剪写入上下文的工具输出。"""
+        content_bytes = len(content.encode("utf-8"))
+        if self.session_tool_result_bytes >= self.max_session_tool_result_bytes:
+            return (
+                f"[{tool_name} result omitted: session tool-result budget exhausted; "
+                "rerun the tool with narrower arguments if full output is needed.]"
+            )
+
+        remaining = self.max_session_tool_result_bytes - self.session_tool_result_bytes
+        if content_bytes <= remaining:
+            self.session_tool_result_bytes += content_bytes
+            return content
+
+        notice = (
+            f"\n\n[...tool result budgeted: {content_bytes - remaining} bytes truncated; "
+            "rerun the tool with narrower arguments for full output...]\n\n"
+        )
+        notice_bytes = len(notice.encode("utf-8"))
+        if remaining <= notice_bytes + 256:
+            self.session_tool_result_bytes = self.max_session_tool_result_bytes
+            return (
+                f"[{tool_name} result omitted: only {remaining} bytes remained in "
+                "session tool-result budget.]"
+            )
+
+        keep_bytes = remaining - notice_bytes
+        head_bytes = keep_bytes // 2
+        tail_bytes = keep_bytes - head_bytes
+        budgeted = _clip_utf8(content, head_bytes) + notice + _clip_utf8(content, tail_bytes, from_end=True)
+        self.session_tool_result_bytes += len(budgeted.encode("utf-8"))
+        return budgeted
 
     def add_user_message(self, content: str) -> None:
         self.messages.append(HumanMessage(content=content))
