@@ -176,3 +176,38 @@ async def test_agent_chat_recalls_task_memory_but_not_profile(workspace_tmp):
     assert "remember_reflection" in tool_names
     assert "remember" not in tool_names
 
+
+@pytest.mark.asyncio
+async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
+    workspace = workspace_tmp
+    memory = MemoryManager(workspace / "memories")
+    memory.remember_project("SmallShrimp 使用 pytest 运行测试")
+    llm = FakeDeepSeekLLM([
+        {
+            "content": "",
+            "tool_calls": [_tool_call("call-recall-1", "recall_memory", {"query": "SmallShrimp 测试"})],
+            "finish_reason": "tool_calls",
+            "reasoning_content": "第一次召回项目测试信息。",
+            "should_store_reasoning": False,
+        },
+        {
+            "content": "",
+            "tool_calls": [_tool_call("call-recall-2", "recall_memory", {"query": "SmallShrimp 测试"})],
+            "finish_reason": "tool_calls",
+            "reasoning_content": "再次查询相同信息。",
+            "should_store_reasoning": False,
+        },
+        {"content": "已确认。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+    ])
+    session = _make_session(memory, llm, workspace)
+
+    answer = await session.chat("这个项目测试怎么跑？")
+    assert answer == "已确认。"
+
+    tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
+    assert len(tool_messages) == 2
+    assert "SmallShrimp 使用 pytest" in tool_messages[0].content
+    assert tool_messages[1].content == "未找到相关任务记忆。"
+    assert len(session.state.surfaced_memory_ids) == 1
+    assert session.state.session_memory_bytes > 0
+

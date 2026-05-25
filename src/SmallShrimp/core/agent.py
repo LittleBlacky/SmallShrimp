@@ -321,7 +321,10 @@ class AgentSession:
                 continue
 
             try:
-                result = await self.agent.tool_registry.execute_tool(name, **args)
+                execute_args = args
+                if name == "recall_memory":
+                    execute_args = {**args, "_session_state": self.state}
+                result = await self.agent.tool_registry.execute_tool(name, **execute_args)
                 failed = result.startswith("Error:")
             except Exception as e:
                 result = f"Error: {e}"

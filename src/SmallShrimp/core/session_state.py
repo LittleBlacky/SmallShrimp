@@ -25,6 +25,37 @@ class SessionState:
     history_manager: Optional["HistoryManager"] = None
     prompt_builder: Optional["PromptBuilder"] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())  # 会话创建时间（固化，保护 prompt 缓存）
+    surfaced_memory_ids: set[str] = field(default_factory=set)
+    session_memory_bytes: int = 0
+    max_session_memory_bytes: int = 60 * 1024
+
+    def filter_new_memories(self, records: list[dict]) -> list[dict]:
+        """按本会话记忆预算筛选尚未展示过的记忆。"""
+        if self.session_memory_bytes >= self.max_session_memory_bytes:
+            return []
+
+        selected: list[dict] = []
+        remaining = self.max_session_memory_bytes - self.session_memory_bytes
+        for record in records:
+            memory_id = str(record.get("id", ""))
+            if memory_id and memory_id in self.surfaced_memory_ids:
+                continue
+
+            content_bytes = len(str(record.get("content", "")).encode("utf-8"))
+            if content_bytes > remaining:
+                continue
+
+            selected.append(record)
+            remaining -= content_bytes
+        return selected
+
+    def mark_memories_surfaced(self, records: list[dict]) -> None:
+        """记录本会话已注入的记忆，避免重复召回。"""
+        for record in records:
+            memory_id = str(record.get("id", ""))
+            if memory_id:
+                self.surfaced_memory_ids.add(memory_id)
+            self.session_memory_bytes += len(str(record.get("content", "")).encode("utf-8"))
 
     def add_user_message(self, content: str) -> None:
         self.messages.append(HumanMessage(content=content))

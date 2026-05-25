@@ -59,7 +59,7 @@ def _extract_params(fn: Callable) -> dict:
     properties = {}
     required = []
     for param_name, param in sig.parameters.items():
-        if param_name in ("self", "cls"):
+        if param_name in ("self", "cls") or param_name.startswith("_"):
             continue
         param_type = _python_type_to_json(param.annotation)
         properties[param_name] = {

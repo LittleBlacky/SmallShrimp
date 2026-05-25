@@ -2,15 +2,20 @@
 from ..tools.decorators import tool
 
 
-def create_memory_tools(memory_manager):
+def create_memory_tools(memory_manager, session_state=None):
     """创建分层记忆工具集。"""
     tools: list = []
 
     @tool(description="搜索任务相关长期记忆。默认只查 facts/projects/reflections，不查用户画像；用户画像已由系统提示稳定注入。")
-    async def recall_memory(query: str) -> str:
+    async def recall_memory(query: str, _session_state=None) -> str:
         records = memory_manager.recall(query, limit=5)
+        state = _session_state or session_state
+        if state is not None:
+            records = state.filter_new_memories(records)
         if not records:
             return "未找到相关任务记忆。"
+        if state is not None:
+            state.mark_memories_surfaced(records)
         return "\n".join(f"- [{r['layer']}] {r['content']}" for r in records)
 
     tools.append(recall_memory)

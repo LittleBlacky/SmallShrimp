@@ -48,6 +48,8 @@ class Tool(ABC):
         param_schema = self.get_parameters()
         allowed = set(param_schema.get("properties", {}).keys())
         for key in kwargs:
+            if key.startswith("_"):
+                continue
             if key not in allowed:
                 return ToolResult(
                     success=False,
