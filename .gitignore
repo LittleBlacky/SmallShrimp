@@ -40,8 +40,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
-docs/
-
 **/config.user.yaml
 **/config.runtime.yaml
 
