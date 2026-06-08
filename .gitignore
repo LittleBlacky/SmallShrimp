@@ -72,3 +72,4 @@ web/public/steps
 .agents/
 skills-lock.json
 .claude/
+.codegraph/
