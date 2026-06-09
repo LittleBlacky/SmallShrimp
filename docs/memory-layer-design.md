@@ -389,7 +389,6 @@ CREATE TABLE IF NOT EXISTS memory_records (
     importance      INTEGER NOT NULL DEFAULT 5 CHECK(importance BETWEEN 0 AND 10),
     confidence      REAL NOT NULL DEFAULT 1.0 CHECK(confidence BETWEEN 0.0 AND 1.0),
     recall_count    INTEGER NOT NULL DEFAULT 0,
-    pinned          INTEGER NOT NULL DEFAULT 0,
     archived        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
@@ -397,7 +396,6 @@ CREATE TABLE IF NOT EXISTS memory_records (
 );
 
 CREATE INDEX idx_memory_layer ON memory_records(layer);
-CREATE INDEX idx_memory_pinned ON memory_records(pinned);
 CREATE INDEX idx_memory_importance ON memory_records(importance DESC);
 CREATE INDEX idx_memory_recall ON memory_records(recall_count DESC);
 ```
@@ -409,15 +407,13 @@ class MemoryStore:
     def __init__(self, db_path: str): ...
 
     def add(self, content: str, layer: str, *, source="auto",
-            importance=None, confidence=1.0, pinned=False) -> dict: ...
+            importance=None, confidence=1.0) -> dict: ...
     def get(self, record_id: str) -> dict | None: ...
     def list(self, layer: str | None = None, *, limit=50,
-             include_archived=False, pinned_only=False) -> list[dict]: ...
+             include_archived=False) -> list[dict]: ...
     def search(self, query: str, layer: str | None = None, *,
                limit=10, include_archived=False) -> list[dict]: ...
     def delete(self, record_id: str, *, force=False) -> bool: ...
-    def pin(self, record_id: str) -> bool: ...
-    def unpin(self, record_id: str) -> bool: ...
     def archive(self, record_id: str) -> bool: ...
     def unarchive(self, record_id: str) -> bool: ...
     def touch_recall(self, record_ids: list[str]) -> None: ...
@@ -435,7 +431,8 @@ class MemoryStore:
 | max_entry_chars | 500 | 单条最大字符数 |
 | compact_threshold | 0.7 | 触发 compact 的容量使用率 |
 
-LRU 淘汰：按 (importance ASC, recall_count ASC, updated_at ASC) 排序，优先淘汰 auto 来源，pinned/explicit 不淘汰。
+LRU 淘汰：按 (importance ASC, recall_count ASC, updated_at ASC) 排序，importance 低的优先淘汰。不另设 pinned 机制。
+高 importance（8-10）的记录天然保留，无需额外标记。
 
 ---
 
@@ -520,8 +517,7 @@ def _find_duplicate(self, content: str, layer: str) -> dict | None:
 ### consolidate() 合并
 
 - 仅同层
-- 跳过 pinned
-- 胜出者优先级：pinned > explicit > import > review > auto > correction > failure_learner
+- 胜出者优先级：importance 高者胜，同分则 explicit > import > review > auto > correction > failure_learner
 - 败者归档（不删除）
 
 ---
