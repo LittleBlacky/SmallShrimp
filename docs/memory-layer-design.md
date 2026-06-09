@@ -122,8 +122,8 @@
 │  │  │  ├─ prefetch(query) → list[dict]                 │     │    │
 │  │  │  ├─ queue_prefetch(query)                        │     │    │
 │  │  │  ├─ sync_turn(user, assistant, session_id, msgs) │     │    │
-│  │  │  ├─ get_tool_schemas() → list[dict]              │     │    │
-│  │  │  ├─ handle_tool_call(name, args) → str           │     │    │
+│  │  │  ├─ store(layer, content, ...)                     │     │    │
+│  │  │  ├─ search(layer, query) → list[dict]             │     │    │
 │  │  │  ├─ on_turn_start / on_session_end               │     │    │
 │  │  │  └─ on_memory_write()                            │     │    │
 │  │  └───────────────────────────────────────────────────┘     │    │
@@ -184,13 +184,13 @@ class MemoryProvider(ABC):
     def sync_turn(self, user_content: str, assistant_content: str,
                   session_id: str = "", messages: list[dict] | None = None) -> None: ...
 
-    # ── 工具接口 ──
+    # ── 存储接口 ──
 
     @abstractmethod
-    def get_tool_schemas(self) -> list[dict]: ...
+    def store(self, layer: str, content: str, **kwargs) -> dict: ...
 
     @abstractmethod
-    def handle_tool_call(self, tool_name: str, args: dict) -> str: ...
+    def search(self, query: str, layer: str | None = None, **kwargs) -> list[dict]: ...
 
     # ── 可选钩子 ──
 
@@ -228,9 +228,6 @@ class MemoryManager:
 
     def sync_turn(self, user_content: str, assistant_content: str,
                   session_id: str = "", messages: list[dict] | None = None) -> None: ...
-
-    def handle_tool_call(self, tool_name: str, args: dict) -> str:
-        """路由到对应 Provider 执行工具。"""
 
     def on_session_end(self, session_id: str) -> None: ...
     def shutdown_all(self) -> None: ...
@@ -337,10 +334,10 @@ class SQLiteBuiltinProvider:
 ```python
 correction = detect_correction_combined(message, prev_assistant)
 if correction and correction.confidence == CorrectionConfidence.HIGH:
-    memory_manager.handle_tool_call("remember_profile", {
-        "content": extract_correction_content(message, correction),
-        "source": "correction",
-    })
+    memory_manager.remember_profile(
+        extract_correction_content(message, correction),
+        source="correction",
+    )
 ```
 
 ### 7.2 Failure → Reflections
@@ -349,11 +346,11 @@ if correction and correction.confidence == CorrectionConfidence.HIGH:
 notes = self.agent.failure_learner.observe_turn(self._turn_failures)
 for note in notes:
     self.state.add_message(SystemMessage(content=note))
-    memory_manager.handle_tool_call("remember_reflection", {
-        "content": note,
-        "importance": 7,
-        "source": "failure_learner",
-    })
+    memory_manager.remember_reflection(
+        note,
+        importance=7,
+        source="failure_learner",
+    )
 ```
 
 ### 7.3 Intent Detection → Review Fork
@@ -571,11 +568,14 @@ async def chat(self, message: str) -> str:
     # 4. Failure → 直接写 SQLite（不更新缓存快照）
     notes = self.agent.failure_learner.observe_turn(self._turn_failures)
     for note in notes:
-        self.memory_manager.handle_tool_call("remember_reflection", ...)
+        self.memory_manager.remember_reflection(note, source="failure_learner")
 
     # 5. Correction → 直接写 SQLite（不更新缓存快照）
     if correction and correction.confidence == CorrectionConfidence.HIGH:
-        self.memory_manager.handle_tool_call("remember_profile", ...)
+        self.memory_manager.remember_profile(
+            extract_correction_content(message, correction),
+            source="correction",
+        )
 
     # 6. Sync — 持久化本轮对话
     self.memory_manager.sync_turn(
