@@ -137,6 +137,10 @@ class AgentSession:
         self._on_thinking = None  # 思考内容回调
         self._confirm_fn = None  # 确认回调
 
+        # 初始化 MemoryProvider 会话级缓存快照
+        if self.agent.memory_manager:
+            self.agent.memory_manager.initialize(self.state.session_id)
+
     @property
     def session_id(self) -> str:
         return self.state.session_id

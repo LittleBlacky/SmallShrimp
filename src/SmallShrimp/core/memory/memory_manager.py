@@ -274,6 +274,38 @@ class MemoryManager:
         self.projects = ProjectMemory(self.memory_dir)
         self.daily = DailyNotes(self.memory_dir)
 
+        # ── Per-session frozen snapshot ──
+        self._snapshot_profile: list[MemoryRecord] | None = None
+
+    def initialize(self, session_id: str) -> None:
+        """初始化会话级缓存快照。
+
+        在 Session 建立时调用，从 SQLite/JSONL 读取 Profile 并缓存到内存。
+        本轮内 Correction 写入 SQLite 但不更新此快照，
+        新 Profile 从下一轮或新会话开始可见。
+        """
+        self._snapshot_profile = self.profile.list_all()[:20]
+
+    def system_prompt_block(self) -> str:
+        """返回缓存的 Profile 快照，不查库。
+
+        与 get_profile() 不同，此方法只返回 initialize() 时的快照。
+        无 profile 条目时返回空字符串，不产生空标题。
+        """
+        if not self._snapshot_profile:
+            return ""
+        lines = ["## User Profile\n"]
+        for r in self._snapshot_profile:
+            lines.append(f"- {r['content']}")
+        return "\n".join(lines)
+
+    def refresh_snapshot(self) -> None:
+        """重新从 SQLite 加载快照。
+
+        在 on_session_switch / on_session_end 时调用。
+        """
+        self._snapshot_profile = self.profile.list_all()[:20]
+
     def remember_profile(self, content: str, *, source: str = "explicit",
                          importance: int = 10, confidence: float = 1.0) -> MemoryRecord:
         return self.profile.store(content, source=source, importance=importance, confidence=confidence)
