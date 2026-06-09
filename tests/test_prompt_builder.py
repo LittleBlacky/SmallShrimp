@@ -169,8 +169,8 @@ def test_prompt_builder_includes_soul(simple_agent_def, temp_workspace):
     assert "haiku" in prompt
 
 
-def test_prompt_builder_includes_runtime_layer(simple_agent_def, temp_workspace):
-    """PromptBuilder should include Runtime section with agent id and timestamp."""
+def test_prompt_builder_no_runtime_layer(simple_agent_def, temp_workspace):
+    """PromptBuilder should NOT include Runtime section (moved to user message)."""
     ws, config = temp_workspace
     pb = PromptBuilder(ws)
 
@@ -182,8 +182,7 @@ def test_prompt_builder_includes_runtime_layer(simple_agent_def, temp_workspace)
     )
 
     prompt = pb.build(state)
-    assert "Runtime" in prompt
-    assert "test-agent" in prompt
+    assert "Runtime" not in prompt
 
 
 def test_prompt_builder_includes_channel_hint_cli(simple_agent_def, temp_workspace):
@@ -283,7 +282,6 @@ def test_session_build_messages_uses_prompt_builder(simple_agent_def, temp_works
     system_msg = messages[0]
     assert system_msg["role"] == "system"
     assert "TestAgent" in system_msg["content"]
-    assert "Runtime" in system_msg["content"]
 
 
 def test_session_fallback_when_no_prompt_builder(simple_agent_def):
@@ -301,7 +299,6 @@ def test_session_fallback_when_no_prompt_builder(simple_agent_def):
 
     system_msg = messages[0]
     assert system_msg["role"] == "system"
-    # Legacy path won't have "Runtime"
     assert "TestAgent" in system_msg["content"]
 
 

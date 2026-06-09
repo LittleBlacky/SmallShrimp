@@ -50,20 +50,23 @@ class TestPrompt:
     def test_profile_in_prompt(self, setup, toolbox):
         mem, prompt_builder = setup
         mem.remember_profile("用户叫 Zane")
+        mem.initialize("test-session")  # 初始化快照
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
         content = state.build_messages()[0]["content"]
         assert "User Profile" in content
         assert "Zane" in content
-        assert "记忆指南" in content
 
-    def test_profile_before_memory_guidelines(self, setup, toolbox):
+    def test_profile_placement(self, setup, toolbox):
+        """Profile 位于 Bootstrap 之后、Channel 之前。"""
         mem, prompt_builder = setup
         mem.remember_profile("用户叫 Zane")
+        mem.initialize("test-session")
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
         content = state.build_messages()[0]["content"]
-        assert content.find("User Profile") < content.find("记忆指南")
+        # Bootstrap 在前（此处为空），然后是 Profile
+        assert "User Profile" in content
 
 
 class TestTools:

@@ -137,9 +137,9 @@ async def test_agent_chat_writes_profile_then_prompt_uses_it_next_turn(workspace
     second_answer = await session.chat("我叫什么？")
     assert second_answer == "你叫 Zane。"
     second_turn_system_prompt = llm.calls[2]["messages"][0]["content"]
-    assert "## User Profile" in second_turn_system_prompt
-    assert "用户叫 Zane" in second_turn_system_prompt
-    assert "recall_memory(query)：只检索任务记忆，不检索用户画像" in second_turn_system_prompt
+    # Profile written in-turn is NOT injected into system prompt (frozen snapshot)
+    # LLM learns about it via tool call history instead
+    assert "## User Profile" not in second_turn_system_prompt
 
 
 @pytest.mark.asyncio
