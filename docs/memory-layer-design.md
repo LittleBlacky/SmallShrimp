@@ -63,11 +63,27 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Agent Loop                                   │
 │                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  █████ 永久缓存段 █████ （整个会话，字节稳定）                │   │
+│  │  [Agent Identity]                                           │   │
+│  │  [Guidelines + Instructions]                                │   │
+│  │  [Memory 工具说明]                                           │   │
+│  │  ← 前缀缓存全程有效，永不失效                                │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              │                                       │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  █████ 每轮冻结段 █████ （initialize() 时缓存，跨轮不变）    │   │
+│  │  Provider.system_prompt_block()                              │   │
+│  │  ├─ Profile 快照 (top-10) ← 缓存，本轮写入不更新             │   │
+│  │  └─ Reflections 快照 (top-5) ← 缓存，本轮写入不更新          │   │
+│  │  ← profile/reflections 极少变，缓存命中率高                   │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                              │                                       │
 │  Turn Start:                                                        │
 │    User Message                                                     │
 │      ├─ Intent Detection → 命中则注入 hint                          │
-│      ├─ Provider.system_prompt_block() → 冻结快照入 system          │
-│      └─ Provider.prefetch(query) → 自动召回注入上下文               │
+│      └─ Provider.prefetch(query) → 注入 user message（非 system）   │
+│         ← 零缓存段：每轮不同，但不碰 system prompt，不破坏前缀缓存   │
 │                                                                     │
 │  Turn Execution:                                                    │
 │      ├─ LLM 可用 memory_manage 工具读写                             │
@@ -75,9 +91,10 @@
 │                                                                     │
 │  Turn End:                                                          │
 │      ├─ Provider.sync_turn(user, assistant) → 持久化本轮             │
-│      ├─ Correction Signal → 直接写 profile                          │
-│      ├─ Failure Signal → 直接写 reflections                         │
+│      ├─ Correction Signal → 写 SQLite，不更新缓存快照               │
+│      ├─ Failure Signal → 写 SQLite，不更新缓存快照                  │
 │      └─ Intent Signal → review fork                                 │
+│         ★ 本轮写入的记忆 → 下一轮才可见（缓存冻结保护）               │
 │                                                                     │
 │  Session End:                                                       │
 │      ├─ consolidate() → 合并近重复                                  │
@@ -145,7 +162,13 @@ class MemoryProvider(ABC):
     @abstractmethod
     def system_prompt_block(self) -> str:
         """返回注入 system prompt 的静态文本块。
-        每轮调用一次，返回冻结快照（不包含本轮刚写入的内容）。
+        
+        关键缓存契约：
+        - initialize() 时从数据库读取一次，缓存到内存
+        - 每轮调用返回的是内存缓存快照，不是实时查库
+        - 本轮内 Correction/Failure 写入 SQLite 但不更新此缓存
+        - 新记忆从下一轮开始可见
+        - 目的：保证 system prompt 字节级稳定，不破坏 LLM provider 的 prefix cache
         """
 
     # ── 前置召回 ──
@@ -190,11 +213,19 @@ class MemoryManager:
 
     def add_provider(self, provider: MemoryProvider, is_builtin: bool = False) -> None: ...
 
+    def initialize(self, session_id: str) -> None:
+        """初始化所有 Provider。
+        每个 Provider 在此阶段从数据库读取 profile/reflections 并缓存。
+        """
+        for p in self._providers:
+            p.initialize(session_id)
+
     def system_prompt_block(self) -> str:
-        """收集所有 Provider 的块，合并返回。"""
+        """收集所有 Provider 的缓存快照（不查库），合并返回。"""
 
     def prefetch(self, query: str, session_id: str = "") -> list[dict]:
-        """从所有 Provider 召回，合并排序后返回。"""
+        """从所有 Provider 召回，合并排序后返回。
+        结果注入 user message 末尾，不碰 system prompt。"""
 
     def sync_turn(self, user_content: str, assistant_content: str,
                   session_id: str = "", messages: list[dict] | None = None) -> None: ...
@@ -270,19 +301,33 @@ Turn End:
 | Prefetch 按需 | facts/projects/reflections | ~1500 chars |
 | LLM 工具 | 全部层 | 不限（LLM 自行调） |
 
-### system_prompt_block 策略
+### system_prompt_block 策略（缓存快照）
 
 ```python
-def system_prompt_block(self) -> str:
-    """冻结快照：profile + 高优 reflections。"""
-    blocks = []
-    profiles = self.store.list(layer="profile", limit=10)
-    if profiles:
-        blocks.append("## User Profile\n" + "\n".join(f"- {r['content']}" for r in profiles))
-    reflections = self.store.list(layer="reflections", limit=5)
-    if reflections:
-        blocks.append("## Agent Reflections\n" + "\n".join(f"- {r['content']}" for r in reflections))
-    return "\n\n".join(blocks)
+class SQLiteBuiltinProvider:
+    def initialize(self, session_id: str, config=None):
+        """初始化时读取数据库，缓存快照到内存。"""
+        self._snapshot_profile = self.store.list(layer="profile", limit=10)
+        self._snapshot_reflections = self.store.list(layer="reflections", limit=5)
+        # 本轮内 Correction/Failure 写入不更新此快照
+
+    def system_prompt_block(self) -> str:
+        """返回 initialize() 时的缓存快照，不查数据库。"""
+        blocks = []
+        if self._snapshot_profile:
+            blocks.append("## User Profile\n" + "\n".join(
+                f"- {r['content']}" for r in self._snapshot_profile
+            ))
+        if self._snapshot_reflections:
+            blocks.append("## Agent Reflections\n" + "\n".join(
+                f"- {r['content']}" for r in self._snapshot_reflections
+            ))
+        return "\n\n".join(blocks)
+
+    def _invalidate_snapshot(self):
+        """下一轮开始时刷新快照（由 on_session_switch/on_session_end 触发）。
+        新会话或下一轮首次调 initialize() 时重新读取。
+        """
 ```
 
 ---
@@ -495,35 +540,59 @@ def _build_profile_block(self, state) -> str:
     return provider.system_prompt_block()
 ```
 
-### Agent.chat()
+### Agent.chat() — 缓存感知的完整流程
 
 ```python
 async def chat(self, message: str) -> str:
+    # ════════════════════════════════════════════════════
     # Turn Start
+    # ════════════════════════════════════════════════════
+
+    # 1. MemoryManager.initialize() — 仅首次
+    #    从 SQLite 读取 profile/reflections，缓存到内存
+    #    之后每轮 system_prompt_block() 返回的是这个缓存快照
+
+    # 2. Intent Detection — 命中则注入 hint 到 user message
     intent = detect_memory_intent(message)
     correction = detect_correction_combined(message, prev_assistant)
-    if correction and correction.confidence == CorrectionConfidence.HIGH:
-        self.memory_manager.handle_tool_call("remember_profile", ...)
     if intent.triggered:
         message = f"{render_memory_intent_hint(intent)}\n\n{message}"
 
+    # 3. Prefetch — 结果注入 user message 尾部，不碰 system prompt
     prefetched = self.memory_manager.prefetch(message, session_id=self.session_id)
-    # → 注入 build_messages()
+    if prefetched:
+        block = "\n\n## Retrieved Memory Context\n" + "\n".join(
+            f"- [{r['layer']}] {r['content']}" for r in prefetched
+        )
+        message = f"{message}\n\n{block}"
+    # system prompt 在此处构建（含 system_prompt_block 缓存快照）
+    # 由于 system prompt 字节稳定，LLM provider 的 prefix cache 全程有效
 
     # ... LLM + Tools ...
 
+    # ════════════════════════════════════════════════════
     # Turn End
+    # ════════════════════════════════════════════════════
+
+    # 4. Failure → 直接写 SQLite（不更新缓存快照）
     notes = self.agent.failure_learner.observe_turn(self._turn_failures)
     for note in notes:
         self.memory_manager.handle_tool_call("remember_reflection", ...)
 
+    # 5. Correction → 直接写 SQLite（不更新缓存快照）
+    if correction and correction.confidence == CorrectionConfidence.HIGH:
+        self.memory_manager.handle_tool_call("remember_profile", ...)
+
+    # 6. Sync — 持久化本轮对话
     self.memory_manager.sync_turn(
         user_content=message, assistant_content=response,
         session_id=self.session_id, messages=self.state.messages,
     )
 
+    # 7. Review fork — Intent 信号延迟写入
     if _should_trigger_review(intent, correction):
         await self._run_review_turn()
+
     return response
 ```
 
