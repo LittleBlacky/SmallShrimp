@@ -64,19 +64,18 @@
 │                        Agent Loop                                   │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  █████ 永久缓存段 █████ （整个会话，字节稳定）                │   │
-│  │  [Agent Identity]                                           │   │
-│  │  [Guidelines + Instructions]                                │   │
-│  │  [Memory 工具说明]                                           │   │
+│  │  █████ 永久缓存段 █████ （进程生命周期，字节稳定）            │   │
+│  │  L1: Identity — AGENT.md 正文                               │   │
+│  │  L2: Soul     — SOUL.md（可选）                              │   │
+│  │  L3: Bootstrap — BOOTSTRAP.md + AGENTS.md + cron 列表        │   │
 │  │  ← 前缀缓存全程有效，永不失效                                │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                              │                                       │
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │  █████ 每轮冻结段 █████ （initialize() 时缓存，跨轮不变）    │   │
 │  │  Provider.system_prompt_block()                              │   │
-│  │  ├─ Profile 快照 (top-10) ← 缓存，本轮写入不更新             │   │
-│  │  └─ Reflections 快照 (top-5) ← 缓存，本轮写入不更新          │   │
-│  │  ← profile/reflections 极少变，缓存命中率高                   │   │
+│  │  └─ Profile 快照 (top-10) ← 缓存，本轮写入不更新             │   │
+│  │  ← profile 极少变，缓存命中率高                               │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                              │                                       │
 │  Turn Start:                                                        │
@@ -215,7 +214,7 @@ class MemoryManager:
 
     def initialize(self, session_id: str) -> None:
         """初始化所有 Provider。
-        每个 Provider 在此阶段从数据库读取 profile/reflections 并缓存。
+        每个 Provider 在此阶段从数据库读取 profile 并缓存。
         """
         for p in self._providers:
             p.initialize(session_id)
@@ -290,14 +289,14 @@ Turn End:
 | **profile** | 用户身份、长期偏好、沟通语言、纠正 | 10 | system prompt 每轮注入 | 永久 | 500 chars |
 | **facts** | 跨会话知识（技术栈、工具用法、约定） | 5 | prefetch 按需召回 | 永久 | 500 chars |
 | **projects** | 项目上下文（路径、命令、技术栈） | 6 | prefetch 按需召回 | 与项目绑定 | 500 chars |
-| **reflections** | Agent 反思（失败模式、行为修正） | 6 | sys prompt 高优 + prefetch | 永久 | 500 chars |
+| **reflections** | Agent 反思（失败模式、行为修正） | 6 | prefetch 按需召回 | 永久 | 500 chars |
 | **sessions** | 短期会话上下文 | 3 | 不跨会话 | 自动归档(7天) | 2000 chars |
 
 ### 注入预算
 
 | 通道 | 来源 | 上限 |
 |------|------|------|
-| System Prompt 固定 | profile(top-10) + reflections(top-5) | ~800 chars |
+| System Prompt 固定 | profile(top-10) | ~500 chars |
 | Prefetch 按需 | facts/projects/reflections | ~1500 chars |
 | LLM 工具 | 全部层 | 不限（LLM 自行调） |
 
@@ -306,28 +305,27 @@ Turn End:
 ```python
 class SQLiteBuiltinProvider:
     def initialize(self, session_id: str, config=None):
-        """初始化时读取数据库，缓存快照到内存。"""
+        """初始化时读取数据库，缓存快照到内存。
+        
+        Reflections 不放入此快照 —— 因其每轮都可能写入，
+        若冻结会导致 prefix cache 持续失效。
+        改为走 prefetch 按需检索，通过 user message 尾部注入。
+        """
         self._snapshot_profile = self.store.list(layer="profile", limit=10)
-        self._snapshot_reflections = self.store.list(layer="reflections", limit=5)
-        # 本轮内 Correction/Failure 写入不更新此快照
+        # 本轮内 Correction 写入不更新此快照
 
     def system_prompt_block(self) -> str:
         """返回 initialize() 时的缓存快照，不查数据库。"""
-        blocks = []
-        if self._snapshot_profile:
-            blocks.append("## User Profile\n" + "\n".join(
-                f"- {r['content']}" for r in self._snapshot_profile
-            ))
-        if self._snapshot_reflections:
-            blocks.append("## Agent Reflections\n" + "\n".join(
-                f"- {r['content']}" for r in self._snapshot_reflections
-            ))
-        return "\n\n".join(blocks)
+        if not self._snapshot_profile:
+            return ""
+        lines = ["## User Profile\n"]
+        for r in self._snapshot_profile:
+            lines.append(f"- {r['content']}")
+        return "\n".join(lines)
 
-    def _invalidate_snapshot(self):
-        """下一轮开始时刷新快照（由 on_session_switch/on_session_end 触发）。
-        新会话或下一轮首次调 initialize() 时重新读取。
-        """
+    def refresh_snapshot(self) -> None:
+        """重新从数据库加载快照（on_session_switch / on_session_end 时调用）。"""
+        self._snapshot_profile = self.store.list(layer="profile", limit=10)
 ```
 
 ---
@@ -625,7 +623,6 @@ memory:
     max_entry_chars: 500
     compact_threshold: 0.7
     max_profile_in_prompt: 10
-    max_reflections_in_prompt: 5
     max_prefetch_results: 5
     max_prefetch_chars: 1500
     session_retention_days: 7
