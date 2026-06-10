@@ -280,11 +280,18 @@ class AgentSession:
             assistant_msg = AssistantMessage(content=response["content"] or "")
             self.state.add_message(assistant_msg)
 
-            # 跨轮次失败学习
+            # 跨轮次失败学习 + 自动写 reflections
             notes = self.agent.failure_learner.observe_turn(self._turn_failures)
             for note in notes:
                 from ..core.message import SystemMessage
                 self.state.add_message(SystemMessage(content=note))
+                if self.agent.memory_manager:
+                    try:
+                        self.agent.memory_manager.remember_reflection(
+                            note, importance=7, source="failure_learner"
+                        )
+                    except Exception:
+                        pass
 
             if self.agent.history_manager:
                 self.agent.history_manager.save(self.session_id, self.state.messages)
