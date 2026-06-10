@@ -166,17 +166,40 @@ class AgentSession:
             await register_mcp_tools(self.agent.mcp_manager, self.agent.tool_registry)
 
         # 检测用户纠正信号（关键词 + 结构分析）
-        from ..core.correction import detect_correction_combined, render_correction_hint
+        from ..core.correction import detect_correction_combined, render_correction_hint, CorrectionConfidence
         # 获取上一条 assistant 消息内容作为结构分析上下文
         prev_assistant = ""
         for m in reversed(self.state.messages):
             if isinstance(m, AssistantMessage) and m.content:
                 prev_assistant = m.content or ""
                 break
-        correction = detect_correction_combined(message, prev_assistant)
+        original_text = message  # 保存原始文本供 prefetch/auto-write 用
+        correction = detect_correction_combined(original_text, prev_assistant)
         if correction:
             hint = render_correction_hint(correction)
             message = f"{hint}\n\n---\n\n{message}"
+            # HIGH 置信度纠正 → 自动写 profile
+            if correction.confidence == CorrectionConfidence.HIGH and self.agent.memory_manager:
+                try:
+                    self.agent.memory_manager.remember_profile(
+                        correction.phrase, source="correction"
+                    )
+                except Exception:
+                    pass
+
+        # Prefetch 记忆 → 注入 user message 尾部（不碰 system prompt）
+        if self.agent.memory_manager:
+            try:
+                prefetched = self.agent.memory_manager.prefetch(original_text, session_id=self.session_id)
+                if prefetched:
+                    lines = ["## Relevant Memory Context"]
+                    lines.append("(以下内容来自记忆库，可作为参考。)")
+                    for r in prefetched:
+                        safe = r["content"].replace("<", "\u200b<")
+                        lines.append(f"- [{r['layer']}] {safe}")
+                    message = f"{message}\n\n" + "\n".join(lines)
+            except Exception:
+                pass
 
         # 添加用户消息
         user_msg = HumanMessage(content=message)
@@ -265,6 +288,18 @@ class AgentSession:
 
             if self.agent.history_manager:
                 self.agent.history_manager.save(self.session_id, self.state.messages)
+
+            # 持久化本轮到 memory sessions 层
+            if self.agent.memory_manager:
+                try:
+                    self.agent.memory_manager.sync_turn(
+                        user_content=original_text,
+                        assistant_content=response["content"] or "",
+                        session_id=self.session_id,
+                    )
+                except Exception:
+                    pass
+
             return response["content"] or ""
 
     async def _execute_tool_calls(self, tool_calls: list) -> None:
