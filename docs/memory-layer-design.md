@@ -49,11 +49,12 @@
 | 架构路线 | **Provider 插件化** | 灵活性，后续可接入 Honcho/Mem0 等 |
 | 分层数量 | **保持 5 层，重新定义边界** | 现有代码已适配 5 层结构 |
 | 存储后端 | **SQLite** | 结构化查询、索引、容量管理、并发安全 |
-| 自动写入 | **Intent Detection + Post-turn Review 双通道** | / |
+| 自动写入 | **Post-turn LLM 提取 + Correction/Failure 信号** | 参考 Mem0 auto-extraction 模式 |
 | Provider 接口 | **需要** | 允许第三方后端，当前内置实现 |
-| 召回策略 | **Lexical + Query Expansion + 时间衰减** | 快速、可预测，不依赖外部 API |
+| 召回策略 | **LLM-driven: keyword top-15 → LLM 语义重排序 → top-5** | 参考 Mem0 三路融合召回（见 §9.1） |
 | 去重策略 | **精确 → 子串 → 模糊三阶段** | 平衡准确率与召回率 |
 | ID 格式 | **UUID4** | 全局唯一，无碰撞风险 |
+| 注入时机 | **LLM 调 recall_memory 时才注入，不每轮自动 prefetch** | 避免噪声，让 LLM 决定何时该回忆 |
 
 ---
 
@@ -80,19 +81,19 @@
 │                              │                                       │
 │  Turn Start:                                                        │
 │    User Message                                                     │
-│      ├─ Intent Detection → 命中则注入 hint                          │
-│      └─ Provider.prefetch(query) → 注入 user message（非 system）   │
-│         ← 零缓存段：每轮不同，但不碰 system prompt，不破坏前缀缓存   │
+│      ├─ Correction Detection → HIGH 自动写 profile                   │
+│      └─ (不再自动 prefetch；LLM 自行决定何时调 recall_memory)        │
 │                                                                     │
 │  Turn Execution:                                                    │
-│      ├─ LLM 可用 memory_manage 工具读写                             │
+│      ├─ LLM 调 recall_memory 时：keyword top-15 → LLM 语义重排序 top-5 │
+│      ├─ LLM 调 remember_* 手动写记忆                                 │
 │      └─ 工具结果经 Scanner 安全过滤                                  │
 │                                                                     │
 │  Turn End:                                                          │
-│      ├─ Provider.sync_turn(user, assistant) → 持久化本轮             │
-│      ├─ Correction Signal → 写 SQLite，不更新缓存快照               │
-│      ├─ Failure Signal → 写 SQLite，不更新缓存快照                  │
-│      └─ Intent Signal → review fork                                 │
+│      ├─ Post-turn LLM 提取：从本轮对话提取值得记住的内容，自动写入   │
+│      │   → profile(用户偏好) / facts(知识) / reflections(教训)       │
+│      ├─ Failure → 写 reflections（不经过 LLM，直接写）               │
+│      └─ sync_turn → 持久化本轮到 sessions 层                         │
 │         ★ 本轮写入的记忆 → 下一轮才可见（缓存冻结保护）               │
 │                                                                     │
 │  Session End:                                                       │
@@ -329,7 +330,30 @@ class SQLiteBuiltinProvider:
 
 ## 7. 自动写入管线
 
-### 7.1 Correction → Profile
+### 7.1 Post-turn LLM 提取（主通道）
+
+参考 Mem0 的 auto-extraction 模式。每轮对话结束后，调 LLM 被动提取值得长期记住的信息：
+
+```python
+# Post-turn: 调一次轻量 LLM
+extract_prompt = """从以下对话中提取需要长期记住的信息。
+返回 JSON 数组，每项含 layer(content)：
+- profile: 用户身份、偏好、纠正
+- facts: 跨会话知识
+- reflections: 失败教训、Agent 行为修正
+
+对话：
+User: {user_content}
+Assistant: {assistant_content}"""
+
+memories = llm.chat(extract_prompt)  # → [{"layer":"facts","content":"项目端口 8000"}, ...]
+for m in memories:
+    memory_manager.remember(m["content"], layer=m["layer"], source="auto_extract")
+```
+
+**可选开关**：通过 `post_turn_extraction_enabled` 配置控制。首次启动时默认关闭，用户手动开启。
+
+### 7.2 Correction → Profile（已实现）
 
 ```python
 correction = detect_correction_combined(message, prev_assistant)
@@ -340,7 +364,7 @@ if correction and correction.confidence == CorrectionConfidence.HIGH:
     )
 ```
 
-### 7.2 Failure → Reflections
+### 7.3 Failure → Reflections（已实现）
 
 ```python
 notes = self.agent.failure_learner.observe_turn(self._turn_failures)
@@ -435,7 +459,37 @@ LRU 淘汰：按 (importance ASC, recall_count ASC, updated_at ASC) 排序，imp
 
 ## 9. 召回与排序
 
-### 召回管线
+### 9.1 召回策略：LLM-driven
+
+参考 Mem0 的多路融合召回模式，但不引入 embedding 依赖：
+
+```
+LLM 调 recall_memory("编译失败")
+      │
+      ▼
+┌──────────────────────────────────────────┐
+│  Step 1: Lexical 宽召回                  │
+│  keyword + CJK unigram + Query Expansion  │
+│  → 拉取 top-15 candidate records          │
+└──────────────┬───────────────────────────┘
+               ▼
+┌──────────────────────────────────────────┐
+│  Step 2: LLM 语义重排序                   │
+│  [System] 从以下记忆候选中选出与查询最相关 │
+│           的 5 条。返回索引列表。           │
+│  [User]   查询: "编译失败"                 │
+│           候选: [0] gcc 报错...            │
+│                 [1] pytest 使用...         │
+│                 ...                       │
+│  → LLM 返回 [0, 4, 7, 12, 3]              │
+└──────────────┬───────────────────────────┘
+               ▼
+         top-5 返回给 Agent
+```
+
+**为什么不用 prefetch**：每轮自动 prefetch 会注入无关噪声（搜到含"测试"的关键词不等于是相关的）。改为 LLM 按需调 recall_memory，自己做语义判断。
+
+### 9.2 Lexical 检索
 
 ```
 Query → [Query Expansion] → [Lexical Recall (limit×3)] → [Cross-layer Merge] → [Budget Trim] → Top-N
@@ -521,7 +575,45 @@ def _find_duplicate(self, content: str, layer: str) -> dict | None:
 
 ## 11. Agent 集成点
 
-### PromptBuilder
+### Agent.chat() — 完整流程
+
+```python
+async def chat(self, message: str) -> str:
+    # ════════════════════════════════════════════════════
+    # Turn Start
+    # ════════════════════════════════════════════════════
+
+    # 1. Correction Detection → HIGH 自动写 profile（不经过 LLM）
+    correction = detect_correction_combined(message, prev_assistant)
+    if correction and correction.confidence == CorrectionConfidence.HIGH:
+        self.memory_manager.remember_profile(correction.phrase, source="correction")
+        message = f"{correction_hint}\n\n{message}"
+
+    # 2. 不再自动 prefetch — LLM 自行决定何时调 recall_memory
+
+    # ... LLM + Tools (含 recall_memory 二阶段召回) ...
+
+    # ════════════════════════════════════════════════════
+    # Turn End
+    # ════════════════════════════════════════════════════
+
+    # 3. Failure → 写 reflections
+    notes = failure_learner.observe_turn(self._turn_failures)
+    for note in notes:
+        self.state.add_message(SystemMessage(content=note))
+        self.memory_manager.remember_reflection(note, source="failure_learner")
+
+    # 4. Post-turn LLM 提取（配置开启时）
+    if post_turn_extraction_enabled:
+        extracted = await self._extract_memories(user_content, assistant_content)
+        for m in extracted:
+            self.memory_manager.remember(m["content"], layer=m["layer"])
+
+    # 5. Sync — 持久化本轮
+    self.memory_manager.sync_turn(user_content, assistant_content, session_id=...)
+
+    return response
+```
 
 ```python
 def _build_profile_block(self, state) -> str:
