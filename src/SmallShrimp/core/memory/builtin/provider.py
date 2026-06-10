@@ -152,19 +152,3 @@ class BuiltinProvider(MemoryProvider):
     def consolidate(self, layers: Iterable[str] | None = None, threshold: float = 0.8) -> int:
         selected = [_normalize_layer(l) for l in layers] if layers else ["facts", "projects", "reflections", "sessions"]
         return sum(self._stores[l].consolidate(threshold=threshold) for l in selected)
-
-
-# ── Re-export from common ──
-from .common import (  # noqa: E402, F401
-    _normalize_layer,
-    _normalize_record,
-    _new_memory_id,
-    _clamp_int,
-    _clamp_float,
-    _memory_quality_boost,
-    _rank_memory,
-    _word_terms,
-    _char_ngrams,
-    _is_duplicate_memory,
-    _has_conflicting_number_suffix,
-)
