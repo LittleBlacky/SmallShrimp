@@ -187,20 +187,6 @@ class AgentSession:
                 except Exception:
                     pass
 
-        # Prefetch 记忆 → 注入 user message 尾部（不碰 system prompt）
-        if self.agent.memory_manager:
-            try:
-                prefetched = self.agent.memory_manager.prefetch(original_text, session_id=self.session_id)
-                if prefetched:
-                    lines = ["## Relevant Memory Context"]
-                    lines.append("(以下内容来自记忆库，可作为参考。)")
-                    for r in prefetched:
-                        safe = r["content"].replace("<", "\u200b<")
-                        lines.append(f"- [{r['layer']}] {safe}")
-                    message = f"{message}\n\n" + "\n".join(lines)
-            except Exception:
-                pass
-
         # 添加用户消息
         user_msg = HumanMessage(content=message)
         self.state.add_message(user_msg)
