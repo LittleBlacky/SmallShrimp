@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 from ..provider import MemoryProvider
 from .store import SQLiteBackend
-from ._helpers import (
+from .common import (
     MemoryLayer,
     MemoryRecord,
     VALID_MEMORY_LAYERS,
@@ -39,23 +39,6 @@ class _SQLiteLayerAdapter:
 
     def consolidate(self, threshold: float = 0.8) -> int:
         return self._backend.consolidate(threshold=threshold, layer=self._layer)
-
-
-# ── Helpers (re-exported from _helpers for backward compat) ──
-# provider.py 中不再定义这些函数，全部从 _helpers 导入。
-from ._helpers import (  # noqa: E402, F401
-    _normalize_layer,
-    _normalize_record,
-    _new_memory_id,
-    _clamp_int,
-    _clamp_float,
-    _memory_quality_boost,
-    _rank_memory,
-    _word_terms,
-    _char_ngrams,
-    _is_duplicate_memory,
-    _has_conflicting_number_suffix,
-)
 
 
 class BuiltinProvider(MemoryProvider):
@@ -171,8 +154,8 @@ class BuiltinProvider(MemoryProvider):
         return sum(self._stores[l].consolidate(threshold=threshold) for l in selected)
 
 
-# ── Re-export helpers from _helpers (noqa: E402 so they appear after classes) ──
-from ._helpers import (  # noqa: E402, F401
+# ── Re-export from common ──
+from .common import (  # noqa: E402, F401
     _normalize_layer,
     _normalize_record,
     _new_memory_id,

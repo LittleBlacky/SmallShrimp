@@ -18,7 +18,7 @@ from .builtin.provider import (
     VALID_MEMORY_LAYERS as _VALID_LAYERS,
     _SQLiteLayerAdapter,
 )
-from .builtin._helpers import (
+from .builtin.common import (
     _normalize_layer,
 )
 
@@ -251,7 +251,7 @@ class MemoryManager:
 
 # ── Backward-compat re-exports ─────────────────────────
 # 旧版代码从 memory_manager 导入这些类/函数，保持可用
-from .builtin._helpers import (  # noqa: E402, F401
+from .builtin.common import (  # noqa: E402, F401
     _rank_memory,
     _memory_quality_boost,
     _normalize_layer,
