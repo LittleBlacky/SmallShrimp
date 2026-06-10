@@ -88,6 +88,28 @@ def _normalize_record(record: dict, layer: MemoryLayer, default_importance: int)
     }
 
 
+# ── Query Expansion ─────────────────────────────────────
+
+_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "错误": ("失败", "报错", "异常", "error", "bug"),
+    "偏好": ("喜欢", "不喜欢", "希望", "习惯", "prefer"),
+    "代码": ("编码", "编程", "开发", "写代码", "code"),
+    "项目": ("仓库", "repo", "工程", "proj"),
+    "配置": ("设置", "config", "setting", "cfg"),
+    "路径": ("目录", "文件夹", "folder", "dir"),
+    "测试": ("test", "pytest", "unittest", "单元测试"),
+}
+
+
+def _expand_query(query: str) -> set[str]:
+    """扩展查询词：命中映射表时返回原始词 + 同义词。"""
+    terms = {query}
+    for key, expansions in _QUERY_EXPANSIONS.items():
+        if key in query:
+            terms.update(expansions)
+    return terms
+
+
 # ── Ranking ─────────────────────────────────────────────
 
 def _char_ngrams(text: str, n: int = 2) -> set[str]:

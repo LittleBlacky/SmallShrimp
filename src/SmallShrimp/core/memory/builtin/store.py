@@ -21,6 +21,7 @@ from .common import (
     _is_duplicate_memory,
     _rank_memory,
     _memory_quality_boost,
+    _expand_query,
 )
 
 # ── Schema ───────────────────────────────────────────────
@@ -121,15 +122,19 @@ class SQLiteBackend:
         return record
 
     def search(self, query: str, layer: str | None = None, limit: int = 10) -> list[MemoryRecord]:
-        """检索记忆记录。"""
+        """检索记忆记录，含 Query Expansion。"""
         records = self.list_all(layer=layer)
-        scored: list[tuple[float, MemoryRecord]] = []
-        for record in records:
-            score = _rank_memory(query, record.get("content", ""))
-            if score >= 1.0 or not query:
-                scored.append((score + _memory_quality_boost(record), record))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        result = [record for _, record in scored[:limit]]
+        queries = _expand_query(query) if query else {query}
+        scored: dict[str, tuple[float, MemoryRecord]] = {}  # record_id → (best_score, record)
+        for q in queries:
+            for record in records:
+                score = _rank_memory(q, record.get("content", ""))
+                if score >= 1.0 or not query:
+                    total = score + _memory_quality_boost(record)
+                    rid = record["id"]
+                    if rid not in scored or total > scored[rid][0]:
+                        scored[rid] = (total, record)
+        result = [record for _, record in sorted(scored.values(), key=lambda x: x[0], reverse=True)[:limit]]
 
         if result and query:
             now = datetime.now().isoformat()
