@@ -114,7 +114,11 @@ def _expand_query(query: str) -> set[str]:
 
 def _char_ngrams(text: str, n: int = 2) -> set[str]:
     clean = text.lower().strip()
-    return {clean[i:i + n] for i in range(len(clean) - n + 1)}
+    grams = {clean[i:i + n] for i in range(len(clean) - n + 1)}
+    # unigram (n=1) 仅对中文：共享单字如 "错误"/"报错" 靠 "错" 匹配
+    if n == 2:
+        grams.update(c for c in clean if '\u4e00' <= c <= '\u9fff')
+    return grams
 
 
 def _word_terms(text: str) -> set[str]:
