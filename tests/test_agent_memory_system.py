@@ -117,139 +117,149 @@ def _make_session(memory: MemoryManager, llm: FakeDeepSeekLLM, workspace: Path) 
 async def test_agent_chat_writes_profile_then_prompt_uses_it_next_turn(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
-    llm = FakeDeepSeekLLM([
-        {
-            "content": "",
-            "tool_calls": [_tool_call("call-profile", "remember_profile", {"content": "用户叫 Zane"})],
-            "finish_reason": "tool_calls",
-            "reasoning_content": "用户明确要求记住姓名，应写入 profile。",
-            "should_store_reasoning": True,
-        },
-        {"content": "已记住你的名字。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
-        {"content": "你叫 Zane。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
-    ])
-    session = _make_session(memory, llm, workspace)
+    try:
+        llm = FakeDeepSeekLLM([
+            {
+                "content": "",
+                "tool_calls": [_tool_call("call-profile", "remember_profile", {"content": "用户叫 Zane"})],
+                "finish_reason": "tool_calls",
+                "reasoning_content": "用户明确要求记住姓名，应写入 profile。",
+                "should_store_reasoning": True,
+            },
+            {"content": "已记住你的名字。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+            {"content": "你叫 Zane。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+        ])
+        session = _make_session(memory, llm, workspace)
 
-    first_answer = await session.chat("记住我叫 Zane")
-    assert first_answer == "已记住你的名字。"
-    assert any(record["content"] == "用户叫 Zane" for record in memory.get_profile())
+        first_answer = await session.chat("记住我叫 Zane")
+        assert first_answer == "已记住你的名字。"
+        assert any(record["content"] == "用户叫 Zane" for record in memory.get_profile())
 
-    second_answer = await session.chat("我叫什么？")
-    assert second_answer == "你叫 Zane。"
-    second_turn_system_prompt = llm.calls[2]["messages"][0]["content"]
-    # Profile written in-turn is NOT injected into system prompt (frozen snapshot)
-    # LLM learns about it via tool call history instead
-    assert "## User Profile" not in second_turn_system_prompt
+        second_answer = await session.chat("我叫什么？")
+        assert second_answer == "你叫 Zane。"
+        second_turn_system_prompt = llm.calls[2]["messages"][0]["content"]
+        assert "## User Profile" not in second_turn_system_prompt
+    finally:
+        memory.close()
 
 
 @pytest.mark.asyncio
 async def test_agent_chat_recalls_task_memory_but_not_profile(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
-    memory.remember_profile("用户叫 Zane")
-    memory.remember_project("SmallShrimp 使用 pytest 运行测试")
-    llm = FakeDeepSeekLLM([
-        {
-            "content": "",
-            "tool_calls": [_tool_call("call-recall", "recall_memory", {"query": "SmallShrimp 测试"})],
-            "finish_reason": "tool_calls",
-            "reasoning_content": "需要项目测试信息，调用任务记忆召回。",
-            "should_store_reasoning": False,
-        },
-        {"content": "这个项目使用 pytest 运行测试。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
-    ])
-    session = _make_session(memory, llm, workspace)
+    try:
+        memory.remember_profile("用户叫 Zane")
+        memory.remember_project("SmallShrimp 使用 pytest 运行测试")
+        llm = FakeDeepSeekLLM([
+            {
+                "content": "",
+                "tool_calls": [_tool_call("call-recall", "recall_memory", {"query": "SmallShrimp 测试"})],
+                "finish_reason": "tool_calls",
+                "reasoning_content": "需要项目测试信息，调用任务记忆召回。",
+                "should_store_reasoning": False,
+            },
+            {"content": "这个项目使用 pytest 运行测试。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+        ])
+        session = _make_session(memory, llm, workspace)
 
-    answer = await session.chat("这个项目测试怎么跑？")
-    assert answer == "这个项目使用 pytest 运行测试。"
+        answer = await session.chat("这个项目测试怎么跑？")
+        assert answer == "这个项目使用 pytest 运行测试。"
 
-    tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
-    assert len(tool_messages) == 1
-    assert "SmallShrimp 使用 pytest" in tool_messages[0].content
-    assert "用户叫 Zane" not in tool_messages[0].content
+        tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
+        assert len(tool_messages) == 1
+        assert "SmallShrimp 使用 pytest" in tool_messages[0].content
+        assert "用户叫 Zane" not in tool_messages[0].content
 
-    first_system_prompt = llm.calls[0]["messages"][0]["content"]
-    assert "用户叫 Zane" in first_system_prompt
-    tool_names = {schema["function"]["name"] for schema in llm.calls[0]["tools"]}
-    assert "remember_profile" in tool_names
-    assert "remember_fact" in tool_names
-    assert "remember_project" in tool_names
-    assert "remember_reflection" in tool_names
-    assert "remember" not in tool_names
+        first_system_prompt = llm.calls[0]["messages"][0]["content"]
+        assert "用户叫 Zane" in first_system_prompt
+        tool_names = {schema["function"]["name"] for schema in llm.calls[0]["tools"]}
+        assert "remember_profile" in tool_names
+        assert "remember_fact" in tool_names
+        assert "remember_project" in tool_names
+        assert "remember_reflection" in tool_names
+        assert "remember" not in tool_names
+    finally:
+        memory.close()
 
 
 @pytest.mark.asyncio
 async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
-    memory.remember_project("SmallShrimp 使用 pytest 运行测试")
-    llm = FakeDeepSeekLLM([
-        {
-            "content": "",
-            "tool_calls": [_tool_call("call-recall-1", "recall_memory", {"query": "SmallShrimp 测试"})],
-            "finish_reason": "tool_calls",
-            "reasoning_content": "第一次召回项目测试信息。",
-            "should_store_reasoning": False,
-        },
-        {
-            "content": "",
-            "tool_calls": [_tool_call("call-recall-2", "recall_memory", {"query": "SmallShrimp 测试"})],
-            "finish_reason": "tool_calls",
-            "reasoning_content": "再次查询相同信息。",
-            "should_store_reasoning": False,
-        },
-        {"content": "已确认。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
-    ])
-    session = _make_session(memory, llm, workspace)
+    try:
+        memory.remember_project("SmallShrimp 使用 pytest 运行测试")
+        llm = FakeDeepSeekLLM([
+            {
+                "content": "",
+                "tool_calls": [_tool_call("call-recall-1", "recall_memory", {"query": "SmallShrimp 测试"})],
+                "finish_reason": "tool_calls",
+                "reasoning_content": "第一次召回项目测试信息。",
+                "should_store_reasoning": False,
+            },
+            {
+                "content": "",
+                "tool_calls": [_tool_call("call-recall-2", "recall_memory", {"query": "SmallShrimp 测试"})],
+                "finish_reason": "tool_calls",
+                "reasoning_content": "再次查询相同信息。",
+                "should_store_reasoning": False,
+            },
+            {"content": "已确认。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+        ])
+        session = _make_session(memory, llm, workspace)
 
-    answer = await session.chat("这个项目测试怎么跑？")
-    assert answer == "已确认。"
+        answer = await session.chat("这个项目测试怎么跑？")
+        assert answer == "已确认。"
 
-    tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
-    assert len(tool_messages) == 2
-    assert "SmallShrimp 使用 pytest" in tool_messages[0].content
-    assert tool_messages[1].content == "未找到相关任务记忆。"
-    assert len(session.state.surfaced_memory_ids) == 1
-    assert session.state.session_memory_bytes > 0
+        tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
+        assert len(tool_messages) == 2
+        assert "SmallShrimp 使用 pytest" in tool_messages[0].content
+        assert tool_messages[1].content == "未找到相关任务记忆。"
+        assert len(session.state.surfaced_memory_ids) == 1
+        assert session.state.session_memory_bytes > 0
+    finally:
+        memory.close()
 
 
 @pytest.mark.asyncio
 async def test_agent_chat_budgets_tool_results_across_session(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
-    llm = FakeDeepSeekLLM([
-        {
-            "content": "",
-            "tool_calls": [
-                _tool_call("call-large-1", "large_output", {}),
-                _tool_call("call-large-2", "large_output", {}),
-            ],
-            "finish_reason": "tool_calls",
-            "reasoning_content": "需要读取大输出。",
-            "should_store_reasoning": False,
-        },
-        {"content": "已处理。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
-    ])
-    session = _make_session(memory, llm, workspace)
-    session.state.max_session_tool_result_bytes = 1000
+    try:
+        llm = FakeDeepSeekLLM([
+            {
+                "content": "",
+                "tool_calls": [
+                    _tool_call("call-large-1", "large_output", {}),
+                    _tool_call("call-large-2", "large_output", {}),
+                ],
+                "finish_reason": "tool_calls",
+                "reasoning_content": "需要读取大输出。",
+                "should_store_reasoning": False,
+            },
+            {"content": "已处理。", "tool_calls": None, "finish_reason": "stop", "reasoning_content": None, "should_store_reasoning": False},
+        ])
+        session = _make_session(memory, llm, workspace)
+        session.state.max_session_tool_result_bytes = 1000
 
-    @tool(description="Return a large test payload.")
-    async def large_output() -> str:
-        return "x" * 2000
+        @tool(description="Return a large test payload.")
+        async def large_output() -> str:
+            return "x" * 2000
 
-    session.agent.tool_registry.register(large_output)
+        session.agent.tool_registry.register(large_output)
 
-    answer = await session.chat("读取大输出")
-    assert answer == "已处理。"
+        answer = await session.chat("读取大输出")
+        assert answer == "已处理。"
 
-    tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "large_output"]
-    assert len(tool_messages) == 2
-    assert "tool result budgeted" in tool_messages[0].content
-    assert "result omitted" in tool_messages[1].content
-    assert session.state.session_tool_result_bytes == session.state.max_session_tool_result_bytes
+        tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "large_output"]
+        assert len(tool_messages) == 2
+        assert "tool result budgeted" in tool_messages[0].content
+        assert "result omitted" in tool_messages[1].content
+        assert session.state.session_tool_result_bytes == session.state.max_session_tool_result_bytes
 
-    second_call_messages = llm.calls[1]["messages"]
-    tool_payloads = [message["content"] for message in second_call_messages if message.get("name") == "large_output"]
-    assert "tool result budgeted" in tool_payloads[0]
-    assert "result omitted" in tool_payloads[1]
+        second_call_messages = llm.calls[1]["messages"]
+        tool_payloads = [message["content"] for message in second_call_messages if message.get("name") == "large_output"]
+        assert "tool result budgeted" in tool_payloads[0]
+        assert "result omitted" in tool_payloads[1]
+    finally:
+        memory.close()
 

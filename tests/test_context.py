@@ -26,17 +26,19 @@ def test_context_from_workspace(workspace_tmp):
 
     _write_minimal_workspace(workspace_tmp)
     context = Context.from_workspace(workspace_tmp)
-
-    assert context.config is not None
-    assert context.agent_loader is not None
-    assert context.skill_loader is not None
-    assert context.history_manager is not None
-    assert context.tool_registry is not None
-    assert context.eventbus is not None
-    assert context.command_registry is not None
-    assert context.prompt_builder is not None
-    assert context.memory_manager is not None
-    assert context.channels == []
+    try:
+        assert context.config is not None
+        assert context.agent_loader is not None
+        assert context.skill_loader is not None
+        assert context.history_manager is not None
+        assert context.tool_registry is not None
+        assert context.eventbus is not None
+        assert context.command_registry is not None
+        assert context.prompt_builder is not None
+        assert context.memory_manager is not None
+        assert context.channels == []
+    finally:
+        context.close()
 
 
 def test_context_dataclass_manual():
@@ -81,22 +83,25 @@ def test_context_agent_receives_memory_manager_in_prompt(workspace_tmp):
 
     _write_minimal_workspace(workspace_tmp)
     context = Context.from_workspace(workspace_tmp)
-    context.memory_manager.remember_profile("我叫zane")
-    agent_def = context.agent_loader.load("pickle")
-    agent = Agent(
-        agent_def,
-        context.config,
-        context.tool_registry,
-        context.history_manager,
-        prompt_builder=context.prompt_builder,
-        memory_manager=context.memory_manager,
-    )
-    session = agent.new_session()
+    try:
+        context.memory_manager.remember_profile("我叫zane")
+        agent_def = context.agent_loader.load("pickle")
+        agent = Agent(
+            agent_def,
+            context.config,
+            context.tool_registry,
+            context.history_manager,
+            prompt_builder=context.prompt_builder,
+            memory_manager=context.memory_manager,
+        )
+        session = agent.new_session()
 
-    system_prompt = session.state.build_messages()[0]["content"]
-    assert agent.memory_manager is context.memory_manager
-    assert "## User Profile" in system_prompt
-    assert "我叫zane" in system_prompt
+        system_prompt = session.state.build_messages()[0]["content"]
+        assert agent.memory_manager is context.memory_manager
+        assert "## User Profile" in system_prompt
+        assert "我叫zane" in system_prompt
+    finally:
+        context.close()
 
 
 if __name__ == "__main__":

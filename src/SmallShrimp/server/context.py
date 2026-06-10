@@ -101,3 +101,8 @@ class Context:
         register_context_tools(context.tool_registry, context)
 
         return context
+
+    def close(self) -> None:
+        """释放资源（关闭内存管理器后端等）。"""
+        if hasattr(self, "memory_manager") and self.memory_manager is not None:
+            self.memory_manager.close()

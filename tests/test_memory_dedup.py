@@ -4,13 +4,24 @@ from pathlib import Path
 
 import pytest
 
-from src.SmallShrimp.core.memory.memory_manager import LayeredMemoryStore
+from src.SmallShrimp.core.memory.builtin.store import SQLiteBackend
+from src.SmallShrimp.core.memory.builtin.provider import _SQLiteLayerAdapter
+
+
+def _layer_store(tmpdir: str, layer: str) -> tuple:
+    """Helper to create a per-layer store. Returns (adapter, backend)."""
+    backend = SQLiteBackend(Path(tmpdir) / "memory.db")
+    return _SQLiteLayerAdapter(backend, layer), backend
 
 
 @pytest.fixture
 def fact_store():
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield LayeredMemoryStore(Path(tmpdir), "facts")
+        adapter, backend = _layer_store(tmpdir, "facts")
+        try:
+            yield adapter
+        finally:
+            backend.close()
 
 
 class TestMemoryDedup:
@@ -39,10 +50,11 @@ class TestMemoryDedup:
 
     def test_dedup_is_layer_local(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            profile = LayeredMemoryStore(root, "profile")
-            facts = LayeredMemoryStore(root, "facts")
+            profile, pb = _layer_store(tmpdir, "profile")
+            facts, fb = _layer_store(tmpdir, "facts")
             profile.store("用户喜欢 Python")
             facts.store("用户喜欢 Python")
             assert len(profile.list_all()) == 1
             assert len(facts.list_all()) == 1
+            pb.close()
+            fb.close()

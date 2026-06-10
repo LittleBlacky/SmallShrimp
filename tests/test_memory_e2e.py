@@ -10,7 +10,11 @@ from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 @pytest.fixture
 def memory():
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield MemoryManager(Path(tmpdir))
+        mem = MemoryManager(Path(tmpdir))
+        try:
+            yield mem
+        finally:
+            mem.close()
 
 
 class TestLayeredMemoryE2E:

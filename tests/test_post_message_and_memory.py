@@ -101,8 +101,11 @@ def test_memory_manager_remember():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         memory = MemoryManager(Path(tmpdir))
-        record = memory.remember_fact("用户偏好 Python")
-        assert record["content"] == "用户偏好 Python"
+        try:
+            record = memory.remember_fact("用户偏好 Python")
+            assert record["content"] == "用户偏好 Python"
+        finally:
+            memory.close()
 
 
 def test_memory_manager_search():
@@ -113,15 +116,18 @@ def test_memory_manager_search():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         memory = MemoryManager(Path(tmpdir))
-        memory.remember_fact("用户偏好 dark mode")
-        memory.remember_project("项目名叫 SmallShrimp")
+        try:
+            memory.remember_fact("用户偏好 dark mode")
+            memory.remember_project("项目名叫 SmallShrimp")
 
-        results = memory.recall("dark")
-        assert len(results) >= 1
-        assert "dark mode" in results[0]["content"]
+            results = memory.recall("dark")
+            assert len(results) >= 1
+            assert "dark mode" in results[0]["content"]
 
-        results = memory.recall("")
-        assert len(results) == 2
+            results = memory.recall("")
+            assert len(results) == 2
+        finally:
+            memory.close()
 
 
 if __name__ == "__main__":

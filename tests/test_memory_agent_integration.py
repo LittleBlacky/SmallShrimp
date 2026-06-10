@@ -43,7 +43,10 @@ def setup():
         workspace = Path(directory)
         mem = MemoryManager(workspace / "memories")
         prompt_builder = PromptBuilder(workspace)
-        yield mem, prompt_builder
+        try:
+            yield mem, prompt_builder
+        finally:
+            mem.close()
 
 
 class TestPrompt:

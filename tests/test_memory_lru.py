@@ -4,13 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from src.SmallShrimp.core.memory.memory_manager import LayeredMemoryStore
+from src.SmallShrimp.core.memory.builtin.store import SQLiteBackend
+from src.SmallShrimp.core.memory.builtin.provider import _SQLiteLayerAdapter
 
 
 @pytest.fixture
 def fact_store():
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield LayeredMemoryStore(Path(tmpdir), "facts", max_entries=5)
+        backend = SQLiteBackend(Path(tmpdir) / "memory.db", max_entries_per_layer=5)
+        try:
+            yield _SQLiteLayerAdapter(backend, "facts")
+        finally:
+            backend.close()
 
 
 class TestMemoryEviction:

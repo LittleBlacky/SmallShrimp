@@ -71,3 +71,4 @@ web/public/steps
 skills-lock.json
 .claude/
 .codegraph/
+.tmp/
