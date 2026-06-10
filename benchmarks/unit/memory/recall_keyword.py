@@ -7,7 +7,7 @@ from pathlib import Path
 
 from SmallShrimp.core.memory.builtin.store import SQLiteBackend
 from SmallShrimp.core.memory.builtin.common import _rank_memory, _expand_query
-from benchmarks.dataset import MEMORIES, QUERIES
+from benchmarks.unit.memory.dataset import MEMORIES, QUERIES
 
 
 def run() -> dict:
