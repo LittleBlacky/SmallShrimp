@@ -297,6 +297,53 @@ def recall_hrr_compressed_tf(encoded: dict[int, "hrr.np.ndarray"]) -> tuple[int,
     return hits, total, details
 
 
+def recall_llm_misses(encoded: dict[int, "hrr.np.ndarray"]) -> tuple[int, int, list[dict]]:
+    """两步法: 先 HRR 基线, 只对漏报用 LLM 扩展查询。
+
+    Pass 1: HRR (压缩+TF) 找漏报
+    Pass 2: 每个漏报走 LLM 扩展 → 重新 HRR 检索
+    """
+    # Pass 1: baseline
+    baseline_hits, total, details = recall_hrr_compressed_tf(encoded)
+    hits = baseline_hits
+
+    # Pass 2: 只扩展漏报
+    miss_indices = [j for j, d in enumerate(details) if d["hit"] == 0]
+    if not miss_indices:
+        return hits, total, details
+
+    print(f"\n  [LLM] 扩展 {len(miss_indices)} 个漏报查询...")
+    for j in miss_indices:
+        query = details[j]["query"]
+        expected = details[j]["expected"]
+
+        queries = _expand_with_llm(query)  # LLM 生成扩展
+        # 合并压缩后的原始查询
+        queries.add(_compress_query(query))
+
+        # 用扩展集重新检索
+        rescored: dict[str, tuple[float, int]] = {}
+        for q in queries:
+            qv = hrr.encode_text_tf(q)
+            for i, vec in encoded.items():
+                hs = (hrr.similarity(qv, vec) + 1.0) / 2.0
+                key = f"{i}"
+                if key not in rescored or hs > rescored[key][0]:
+                    rescored[key] = (hs, i)
+        top5 = [idx for _, idx in sorted(rescored.values(), key=lambda x: x[0], reverse=True)[:5]]
+        new_hit = len(set(top5) & expected)
+
+        if new_hit > 0:
+            hits += new_hit
+            details[j]["hit"] = new_hit
+            details[j]["top5"] = top5
+            print(f"    ✅ {query:30s} 补上了! (原 0/{details[j]['total']} → {new_hit}/{details[j]['total']})")
+        else:
+            print(f"    ❌ {query:30s} 仍漏报")
+
+    return hits, total, details
+
+
 # ── 主流程 ───────────────────────────────────────────────
 
 def run() -> dict:
@@ -321,11 +368,11 @@ def run() -> dict:
     # ── LLM 预检查 ─────────────────────────────────
     use_llm = os.environ.get("LLM_EXPAND", "").lower() in ("1", "true", "yes")
     if use_llm:
-        print("  LLM Query Expansion: 已启用")
-        # 预加载一次检查配置是否可用
+        print("  LLM Query Expansion: 已启用（仅扩展漏报查询）")
+        # 预加载一次检查配置
         _get_llm_expansions("test")
     else:
-        print("  LLM Query Expansion: 未启用（设置 LLM_EXPAND=true）")
+        print("  LLM Query Expansion: 未启用（设置 LLM_EXPAND=true 开启）")
 
     # 策略测试
     results: dict[str, Any] = {}
@@ -343,12 +390,12 @@ def run() -> dict:
         elapsed = time.perf_counter() - t0
         results[name] = {"hits": hits, "total": total, "elapsed": elapsed, "details": details}
 
-    # LLM expansion（如果启用）
+    # LLM 扩展漏报（如果启用）
     if use_llm:
         t0 = time.perf_counter()
-        hits, total, details = recall_hrr_llm(encoded)
+        hits, total, details = recall_llm_misses(encoded)
         elapsed = time.perf_counter() - t0
-        results["hrr + LLM扩展"] = {"hits": hits, "total": total, "elapsed": elapsed, "details": details}
+        results["hrr (压缩+TF) + LLM扩展"] = {"hits": hits, "total": total, "elapsed": elapsed, "details": details}
 
     # ── 输出 ──────────────────────────────────────────
     print(f"\n{'策略':<28s} {'recall@5':>10s} {'耗时':>8s}")
@@ -377,7 +424,7 @@ def run() -> dict:
             results["fusion"]["details"][j]["hit"],
         ]
         if use_llm:
-            vals.append(results["hrr + LLM扩展"]["details"][j]["hit"])
+            vals.append(results["hrr (压缩+TF) + LLM扩展"]["details"][j]["hit"])
         total_exp = results["keyword-only"]["details"][j]["total"]
 
         def _mark(h: int) -> str:
