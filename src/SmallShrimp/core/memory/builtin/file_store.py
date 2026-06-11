@@ -22,6 +22,8 @@ from .common import (
     _new_memory_id,
 )
 from .hybrid_search import (
+    EmbeddingProvider,
+    create_embedding_provider,
     setup_vector_table,
     insert_vector,
     hybrid_search as _hybrid_search,
@@ -106,7 +108,8 @@ class MarkdownStore:
     读取时: 从 .md 文件加载
     """
 
-    def __init__(self, memory_dir: Path, use_vector: bool = False):
+    def __init__(self, memory_dir: Path, use_vector: bool = False,
+                 embedding_provider: EmbeddingProvider | None = None):
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         (memory_dir / _DAILY_DIR).mkdir(parents=True, exist_ok=True)
@@ -118,14 +121,22 @@ class MarkdownStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_FTS_SCHEMA)
 
-        # 向量表（仅当显式启用 + 依赖可用）
-        self._has_vector = False
-        if use_vector and _HAS_SQLITE_VEC:
+        # Embedding 提供者（本地 or API）
+        self._embedding_provider = embedding_provider
+        if self._embedding_provider is None and use_vector:
+            self._embedding_provider = create_embedding_provider("local")
+
+        # 向量表（仅当 embedding 可用 + sqlite-vec 已安装）
+        self._has_vector = bool(
+            self._embedding_provider is not None
+            and _HAS_SQLITE_VEC
+        )
+        if self._has_vector:
             try:
-                setup_vector_table(self._conn)
+                setup_vector_table(self._conn, self._embedding_provider)
                 self._has_vector = True
             except Exception:
-                pass
+                self._has_vector = False
 
         # 确保所有层对应的 .md 文件存在
         for layer in ["profile", "facts", "projects", "reflections"]:
@@ -180,7 +191,7 @@ class MarkdownStore:
         )
         # 同步向量（如果可用）
         if self._has_vector:
-            insert_vector(self._conn, cur.lastrowid, content)
+            insert_vector(self._conn, cur.lastrowid, content, self._embedding_provider)
         self._conn.commit()
 
         return {
@@ -239,6 +250,7 @@ class MarkdownStore:
             limit=limit,
             fts_query=fts_q,
             use_vector=self._has_vector,
+            embedding_provider=self._embedding_provider,
         )
 
         # 补齐 memory_index 中的字段

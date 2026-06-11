@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from ..provider import MemoryProvider
 from .file_store import MarkdownStore
+from .hybrid_search import create_embedding_provider, EmbeddingProvider
 from .common import (
     MemoryLayer,
     MemoryRecord,
@@ -44,10 +45,32 @@ class BuiltinProvider(MemoryProvider):
     SQLite 仅为检索加速，索引丢失不影响记忆。
     """
 
-    def __init__(self, memory_dir: Path, use_vector: bool = False) -> None:
+    def __init__(self, memory_dir: Path, use_vector: bool = False,
+                 embedding_config: str | None = None,
+                 embedding_provider: EmbeddingProvider | None = None) -> None:
+        """初始化内置记忆提供者。
+
+        Args:
+            memory_dir: 记忆存储目录
+            use_vector: 是否启用向量检索（True 时自动使用本地 embedding）
+            embedding_config: 嵌入配置字符串
+                - None / ""   → 不启用
+                - "local"     → 本地 sentence-transformers
+                - "local:模型名"
+                - "api://模型名"
+            embedding_provider: 直接传入 EmbeddingProvider 实例（优先级最高）
+        """
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self._store = MarkdownStore(memory_dir, use_vector=use_vector)
+
+        # 决定 embedding provider
+        resolved: EmbeddingProvider | None = embedding_provider
+        if resolved is None and embedding_config:
+            resolved = create_embedding_provider(embedding_config)
+        if resolved is None and use_vector:
+            resolved = create_embedding_provider("local")
+
+        self._store = MarkdownStore(memory_dir, embedding_provider=resolved)
         self._stores = {
             layer: _MarkerLayerAdapter(self._store, layer)
             for layer in VALID_MEMORY_LAYERS

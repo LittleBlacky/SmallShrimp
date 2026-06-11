@@ -13,6 +13,7 @@ from typing import Iterable
 from .provider import MemoryProvider
 from .builtin.provider import (
     BuiltinProvider,
+    _MarkerLayerAdapter,
     MemoryLayer as _MemoryLayer,
     MemoryRecord as _MemoryRecord,
     VALID_MEMORY_LAYERS as _VALID_LAYERS,
