@@ -54,9 +54,18 @@ def bind(a: "np.ndarray", b: "np.ndarray") -> "np.ndarray":
 
 
 def bundle(*vectors: "np.ndarray") -> "np.ndarray":
-    """叠加 = 复数平均。合并多个向量为一个。"""
+    """叠加 = 复数平均。合并多个向量为一个（等权）。"""
     _require_numpy()
     complex_sum = np.sum([np.exp(1j * v) for v in vectors], axis=0)
+    return np.angle(complex_sum) % _TWO_PI
+
+
+def bundle_weighted(vectors: list["np.ndarray"], weights: list[float]) -> "np.ndarray":
+    """加权叠加 = 带权复数平均。重要 token 贡献更多信号。"""
+    _require_numpy()
+    w = np.asarray(weights, dtype=np.float64)
+    w = w / w.sum()  # 归一化
+    complex_sum = np.sum(w[:, None] * np.exp(1j * np.asarray(vectors)), axis=0)
     return np.angle(complex_sum) % _TWO_PI
 
 
@@ -71,6 +80,7 @@ def similarity(a: "np.ndarray", b: "np.ndarray") -> float:
 # ── 文本编码 ─────────────────────────────────────────────
 
 _CJK_RANGE = _re.compile(r'[\u4e00-\u9fff]')
+_ASCII_RANGE = _re.compile(r'[a-zA-Z0-9_]')
 
 
 def _tokenize_text(text: str) -> list[str]:
@@ -130,6 +140,41 @@ def encode_text(text: str, dim: int = 1024) -> "np.ndarray":
     else:
         atom_vectors = [encode_atom(token, dim) for token in tokens]
         vec = bundle(*atom_vectors)
+    _ENCODE_CACHE[cache_key] = vec.copy()
+    return vec
+
+
+def encode_text_tf(text: str, dim: int = 1024) -> "np.ndarray":
+    """TF 加权版：高频 token 降权，ASCII/bigram 升权。
+
+    权重公式:
+        base = 1.5  if 含 ASCII 字符
+               1.2  if 长度 >= 2 且不含 ASCII
+               1.0  else
+        weight = base / log(1 + 词频)  # 文本内频次降权
+    """
+    _require_numpy()
+    cache_key = (text, dim, "tf")
+    if cache_key in _ENCODE_CACHE:
+        return _ENCODE_CACHE[cache_key].copy()
+
+    tokens = _tokenize_text(text)
+    if not tokens:
+        vec = encode_atom("__hrr_empty__", dim)
+    else:
+        from collections import Counter
+        freq = Counter(tokens)
+        vectors: list[np.ndarray] = []
+        weights: list[float] = []
+        for tok in tokens:
+            base = 1.5 if _ASCII_RANGE.search(tok) else (1.2 if len(tok) >= 2 else 1.0)
+            w = base / max(1.0, 1.0 + math.log(freq[tok]))
+            weight_key = (tok, dim)
+            weight_key = (tok, dim)
+            vectors.append(encode_atom(tok, dim))
+            weights.append(w)
+        vec = bundle_weighted(vectors, weights)
+
     _ENCODE_CACHE[cache_key] = vec.copy()
     return vec
 

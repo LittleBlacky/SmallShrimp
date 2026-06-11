@@ -372,3 +372,80 @@ Round  改动                        recall@5  HRR查询耗时
 根因：bag-of-words 级别编码无法区分 "文件配置" 和 "文件读取出错" 的组合语义。rank=1 噪音是 "配置文件在 config/user.yaml"（含 "文件" 二字）。需要上下文感知 embedding 才能解耦。
 
 **建议**：94% 对零模型依赖方案已足够好。剩余 6% 留给未来升级（sentence-transformers 或 LLM 重排序）。
+
+---
+
+## Round 7 — TF 加权 HRR（失败）
+
+**目的**：高频 token（"的"、"了"、"是"）等权叠加会稀释信号，TF 加权应该能放大稀有 token 的贡献。
+
+**假设**：
+
+- ASCII token（`build`、`read_file`）稀有 → 给高权重 → 提升中英匹配
+- bigram 比 unigram 信息量更大 → 给高权重
+- 高频停用词自动降权
+
+**改动**：
+
+- `hrr.py` 新增 `bundle_weighted()` — 加权复数平均
+- `hrr.py` 新增 `encode_text_tf()` — TF 加权编码
+- `recall_hrr.py` 新增 `recall_hrr_tf()` — TF 加权召回
+
+**权重公式**：
+
+```
+base = 1.5  if 含 ASCII 字符       (稀有 token)
+       1.2  if 长度 >= 2 且中文    (bigram，信息量大)
+       1.0  else                   (CJK unigram)
+weight = base / log(1 + 词频)      # 文本内频次降权
+```
+
+**结果**：
+
+```
+策略                         recall@5
+─────────────────────────────────────
+keyword-only                   88%
+hrr (等权)                     94%  ← 最佳
+hrr (TF)                       88%  ❌ 退化
+hybrid (0.7kw+0.3hrr)         94%
+```
+
+**分析**：
+
+TF 加权不仅没提升，反而丢失了等权 HRR 已经抓到的 "编译失败了"。
+
+1. **ASCII 升权对中文场景没帮助** — "build" 权重翻倍，但 query 是中文 "编译"，英文字面上没有更相似
+2. **bigram 升权反而稀释** — bigram（"编译"、"失败"）已经包含 unigram（"编"、"译"、"失"、"败"）的全部信息，再给 bigram 额外权重等于重复信号，导致 bundle 中语义重心偏移
+3. **等权叠加是 HRR 的最佳配置** — 所有 token 在 bundle 中均衡表达，对中文短文本更稳健
+
+**教训**：HRR 的 bundle 对权重设计很敏感。**"公平"比"聪明"更可靠**——等权叠加不假设哪个 token 更重要，信息自然呈现。
+
+---
+
+## 实验最终总结
+
+```
+Round  改动                        recall@5  耗时
+────────────────────────────────────────────────────
+  0    keyword baseline             88%       —
+  1    首次 HRR (空格分词)           44%       74ms
+  2    字符级中文 tokenization       94% ✅    438ms
+  3    权重扫描                     94%       438ms
+  4    漏报诊断                     94%       438ms
+  5    snake_case 拆分 (回退)        88% ❌    —
+  6    编码缓存                      94%       34ms ✅
+  7    TF 加权                     88% ❌    —
+```
+
+**最终结论**：
+
+| 策略 | recall@5 | 耗时 |
+|------|----------|------|
+| keyword-only | 88% | 17ms |
+| HRR-only (等权, 缓存) | **94%** | 34ms |
+| hybrid | 94% | 21ms |
+
+HRR 达到 94% 的关键因素是 **字符级中文 tokenization**。后续尝试的所有优化（snake_case 拆分、TF 加权）都反而退化——等权叠加在中文短文本上最稳健。
+
+剩余 1 个漏报 "上次读文件出错了" 是 bag-of-words 的天花板。要走得更远需要 LLM Query Expansion 或真正的 embedding 模型。

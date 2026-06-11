@@ -26,9 +26,14 @@ def _encode_all() -> dict[int, "hrr.np.ndarray"]:
     return {i: hrr.encode_text(content, DIM) for i, (_, content) in enumerate(MEMORIES)}
 
 
-def _hrr_score(query: str, vec: "hrr.np.ndarray") -> float:
+def _encode_all_tf() -> dict[int, "hrr.np.ndarray"]:
+    """TF 加权版预编码。"""
+    return {i: hrr.encode_text_tf(content, DIM) for i, (_, content) in enumerate(MEMORIES)}
+
+
+def _hrr_score(query: str, vec: "hrr.np.ndarray", tf: bool = False) -> float:
     """HRR 相似度 → [0, 1] 区间。"""
-    qv = hrr.encode_text(query, DIM)
+    qv = hrr.encode_text_tf(query, DIM) if tf else hrr.encode_text(query, DIM)
     return (hrr.similarity(qv, vec) + 1.0) / 2.0
 
 
@@ -93,6 +98,20 @@ def recall_hybrid(encoded: dict[int, "hrr.np.ndarray"], kw_weight: float = 0.7) 
     return hits, total, details
 
 
+def recall_hrr_tf(encoded_tf: dict[int, "hrr.np.ndarray"]) -> tuple[int, int, list[dict]]:
+    """TF 加权 HRR 召回。"""
+    hits, total = 0, 0
+    details = []
+    for query, expected in QUERIES:
+        scored = {i: _hrr_score(query, vec, tf=True) for i, vec in encoded_tf.items()}
+        top5 = [i for i, _ in sorted(scored.items(), key=lambda x: x[1], reverse=True)[:5]]
+        hit = len(set(top5) & expected)
+        hits += hit
+        total += len(expected)
+        details.append({"query": query, "expected": expected, "top5": top5, "hit": hit, "total": len(expected)})
+    return hits, total, details
+
+
 # ── 主流程 ───────────────────────────────────────────────
 
 def run() -> dict:
@@ -105,16 +124,22 @@ def run() -> dict:
     encoded = _encode_all()
     encode_time = time.perf_counter() - t0
 
-    vec_size = len(hrr.phases_to_bytes(encoded[0]))
-    print(f"\n  HRR 编码: {len(MEMORIES)} 条, {encode_time*1000:.1f}ms, "
-          f"每条 {vec_size/1024:.0f}KB (dim={DIM})")
+    t0 = time.perf_counter()
+    encoded_tf = _encode_all_tf()
+    encode_tf_time = time.perf_counter() - t0
 
-    # 三路测试
+    vec_size = len(hrr.phases_to_bytes(encoded[0]))
+    print(f"\n  等权 HRR: {len(MEMORIES)} 条, {encode_time*1000:.1f}ms")
+    print(f"  TF 加权:  {len(MEMORIES)} 条, {encode_tf_time*1000:.1f}ms")
+    print(f"  每条向量: {vec_size/1024:.0f}KB (dim={DIM})")
+
+    # 策略测试
     results = {}
 
     for name, fn in [
         ("keyword-only", lambda: recall_keyword()),
-        ("hrr-only", lambda: recall_hrr_only(encoded)),
+        ("hrr (等权)", lambda: recall_hrr_only(encoded)),
+        ("hrr (TF)", lambda: recall_hrr_tf(encoded_tf)),
         ("hybrid (0.7kw+0.3hrr)", lambda: recall_hybrid(encoded)),
     ]:
         t0 = time.perf_counter()
@@ -130,18 +155,19 @@ def run() -> dict:
         print(f"  {name:<26s} {r['hits']}/{r['total']} = {rate:4.0f}%  {r['elapsed']*1000:6.1f}ms")
 
     # ── 逐条对比 ──────────────────────────────────────
-    print(f"\n{'查询':<18s} {'期望':>6s} {'keyword':>8s} {'HRR':>8s} {'hybrid':>8s}")
-    print("-" * 54)
+    print(f"\n{'查询':<18s} {'期望':>6s} {'keywd':>6s} {'等权':>6s} {'TF':>6s} {'hybrd':>6s}")
+    print("-" * 58)
     for j, (query, expected) in enumerate(QUERIES):
         kw_hit = results["keyword-only"]["details"][j]["hit"]
-        hrr_hit = results["hrr-only"]["details"][j]["hit"]
+        hr_hit = results["hrr (等权)"]["details"][j]["hit"]
+        tf_hit = results["hrr (TF)"]["details"][j]["hit"]
         hy_hit = results["hybrid (0.7kw+0.3hrr)"]["details"][j]["hit"]
         total_exp = results["keyword-only"]["details"][j]["total"]
 
         def _mark(h: int) -> str:
-            return "✅" if h > 0 else "❌"
+            return " ✅" if h > 0 else " ❌"
 
-        print(f"  {query:<16s} {total_exp:>4d}个  {_mark(kw_hit):>6s}      {_mark(hrr_hit):>6s}    {_mark(hy_hit):>6s}")
+        print(f"  {query:<16s} {total_exp:>4d}个 {_mark(kw_hit):>5s}  {_mark(hr_hit):>5s}  {_mark(tf_hit):>5s}  {_mark(hy_hit):>5s}")
 
     # ── 权重扫描 ──────────────────────────────────────
     print(f"\n{'权重扫描 (keyword 占比)':─^48s}")
