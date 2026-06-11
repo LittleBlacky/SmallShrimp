@@ -7,7 +7,7 @@ from pathlib import Path
 
 from SmallShrimp.core.memory.builtin.store import SQLiteBackend
 from SmallShrimp.core.memory.builtin.common import _rank_memory, _expand_query
-from benchmarks.unit.memory.dataset import MEMORIES, QUERIES
+from benchmarks.unit.memory.dataset import MEMORIES, QUERIES, resolve_expected
 
 
 def run() -> dict:
@@ -23,6 +23,7 @@ def run() -> dict:
             details = []
 
             for query, expected in QUERIES:
+                expected = resolve_expected(expected, MEMORIES)
                 queries = _expand_query(query) if query else {query}
                 scored: dict[str, tuple[float, dict]] = {}
                 for q in queries:
