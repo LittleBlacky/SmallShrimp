@@ -225,6 +225,78 @@ def recall_hrr_llm(encoded: dict[int, "hrr.np.ndarray"]) -> tuple[int, int, list
     return hits, total, details
 
 
+# ── 结果级融合 ───────────────────────────────────────────
+
+def recall_fusion(encoded: dict[int, "hrr.np.ndarray"]) -> tuple[int, int, list[dict]]:
+    """结果级融合: keyword top-10 + HRR top-10 → 合并取 top-5。"""
+    hits, total = 0, 0
+    details = []
+    for query, expected in QUERIES:
+        expected = resolve_expected(expected, MEMORIES)
+        # keyword top-10
+        kw_scored: dict[int, float] = {}
+        for q in (_expand_query(query) if query else {query}):
+            for i, (_, content) in enumerate(MEMORIES):
+                s = _rank_memory(q, content)
+                if s >= 1.0:
+                    kw_scored[i] = max(kw_scored.get(i, 0), s)
+        kw_top10 = {i for i, _ in sorted(kw_scored.items(), key=lambda x: x[1], reverse=True)[:10]}
+        # HRR top-10
+        hrr_top10 = {i for i, _ in sorted(
+            {i: _hrr_score(query, vec) for i, vec in encoded.items()}.items(),
+            key=lambda x: x[1], reverse=True
+        )[:10]}
+        # 融合: keyword 优先 + HRR 补充排序
+        combined = list(kw_top10 | hrr_top10)
+        combined.sort(key=lambda i: _hrr_score(query, encoded[i]), reverse=True)
+        top5 = combined[:5]
+        hit = len(set(top5) & expected)
+        hits += hit
+        total += len(expected)
+        details.append({"query": query, "expected": expected, "top5": top5, "hit": hit, "total": len(expected)})
+    return hits, total, details
+
+
+# ── 查询压缩 ─────────────────────────────────────────────
+
+_STRIP_PATTERNS = [
+    (r"^(上次你说|之前那个|那个|你们)", ""),
+    (r"^(应该|可以|想要|需要|想|要怎么|要怎样|怎么才能|有没有什么|有什么办法)", ""),
+    (r"(用什么|用哪个|用的什么)(工具|方式|方案|方法|技术|库|平台)", "用"),
+    (r"(的问题|的情况|的时候|这件事|那件事)", ""),
+    (r"后来怎么修的$", ""),
+    (r"有什么(要求|讲究|建议|推荐|注意)", ""),
+    (r"是(怎么|什么|在哪|哪个)", ""),
+    (r"[吗呢吧]$", ""),
+    (r"的$", ""),
+    (r"怎么$", ""),
+]
+
+
+def _compress_query(q: str) -> str:
+    import re as _re
+    for pattern, replacement in _STRIP_PATTERNS:
+        q = _re.sub(pattern, replacement, q)
+    return q.strip()
+
+
+def recall_hrr_compressed_tf(encoded: dict[int, "hrr.np.ndarray"]) -> tuple[int, int, list[dict]]:
+    """压缩查询 + TF 加权 HRR。"""
+    hits, total = 0, 0
+    details = []
+    for query, expected in QUERIES:
+        expected = resolve_expected(expected, MEMORIES)
+        cq = _compress_query(query)
+        qv = hrr.encode_text_tf(cq)
+        scored = {i: (hrr.similarity(qv, vec) + 1.0) / 2.0 for i, vec in encoded.items()}
+        top5 = [i for i, _ in sorted(scored.items(), key=lambda x: x[1], reverse=True)[:5]]
+        hit = len(set(top5) & expected)
+        hits += hit
+        total += len(expected)
+        details.append({"query": query, "expected": expected, "top5": top5, "hit": hit, "total": len(expected)})
+    return hits, total, details
+
+
 # ── 主流程 ───────────────────────────────────────────────
 
 def run() -> dict:
@@ -262,7 +334,9 @@ def run() -> dict:
         ("keyword-only", lambda: recall_keyword()),
         ("hrr (等权)", lambda: recall_hrr_only(encoded)),
         ("hrr (TF)", lambda: recall_hrr_tf(encoded_tf)),
+        ("hrr (压缩+TF)", lambda: recall_hrr_compressed_tf(encoded)),
         ("hybrid (0.7kw+0.3hrr)", lambda: recall_hybrid(encoded)),
+        ("fusion", lambda: recall_fusion(encoded)),
     ]:
         t0 = time.perf_counter()
         hits, total, details = fn()
@@ -287,7 +361,7 @@ def run() -> dict:
         print(f"  {name:<26s} {r['hits']}/{r['total']} = {rate:4.0f}%  {r['elapsed']*1000:6.1f}ms")
 
     # ── 逐条对比 ──────────────────────────────────────
-    headers = ["keywd", "等权", "TF", "hybrd"]
+    headers = ["keywd", "等权", "TF", "压TF", "hybrd", "融合"]
     if use_llm:
         headers.append("LLM+")
     header_line = "  ".join(f"{h:>6s}" for h in headers)
@@ -298,7 +372,9 @@ def run() -> dict:
             results["keyword-only"]["details"][j]["hit"],
             results["hrr (等权)"]["details"][j]["hit"],
             results["hrr (TF)"]["details"][j]["hit"],
+            results["hrr (压缩+TF)"]["details"][j]["hit"],
             results["hybrid (0.7kw+0.3hrr)"]["details"][j]["hit"],
+            results["fusion"]["details"][j]["hit"],
         ]
         if use_llm:
             vals.append(results["hrr + LLM扩展"]["details"][j]["hit"])
