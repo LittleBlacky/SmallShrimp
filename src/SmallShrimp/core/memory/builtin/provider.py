@@ -44,10 +44,10 @@ class BuiltinProvider(MemoryProvider):
     SQLite 仅为检索加速，索引丢失不影响记忆。
     """
 
-    def __init__(self, memory_dir: Path) -> None:
+    def __init__(self, memory_dir: Path, use_vector: bool = False) -> None:
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self._store = MarkdownStore(memory_dir)
+        self._store = MarkdownStore(memory_dir, use_vector=use_vector)
         self._stores = {
             layer: _MarkerLayerAdapter(self._store, layer)
             for layer in VALID_MEMORY_LAYERS

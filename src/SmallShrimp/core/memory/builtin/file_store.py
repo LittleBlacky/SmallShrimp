@@ -106,7 +106,7 @@ class MarkdownStore:
     读取时: 从 .md 文件加载
     """
 
-    def __init__(self, memory_dir: Path):
+    def __init__(self, memory_dir: Path, use_vector: bool = False):
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         (memory_dir / _DAILY_DIR).mkdir(parents=True, exist_ok=True)
@@ -118,9 +118,9 @@ class MarkdownStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_FTS_SCHEMA)
 
-        # 向量表（如果可用）
+        # 向量表（仅当显式启用 + 依赖可用）
         self._has_vector = False
-        if _HAS_SQLITE_VEC:
+        if use_vector and _HAS_SQLITE_VEC:
             try:
                 setup_vector_table(self._conn)
                 self._has_vector = True

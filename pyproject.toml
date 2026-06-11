@@ -18,6 +18,18 @@ dependencies = [
     "websockets>=11.0.0",
 ]
 
+[project.optional-dependencies]
+memory = [
+    "jieba>=0.42.0",
+]
+vector = [
+    "sqlite-vec>=0.1.0",
+    "sentence-transformers>=3.0.0",
+]
+benchmark = [
+    "numpy>=1.24.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
