@@ -16,7 +16,6 @@ from .builtin.provider import (
     MemoryLayer as _MemoryLayer,
     MemoryRecord as _MemoryRecord,
     VALID_MEMORY_LAYERS as _VALID_LAYERS,
-    _SQLiteLayerAdapter,
 )
 from .builtin.common import (
     _normalize_layer,
@@ -109,7 +108,7 @@ class MemoryManager:
 
         # 快捷引用（兼容旧代码直接访问 stores/profile/facts 等）
         self.stores = {
-            layer: _SQLiteLayerAdapter(self._provider._db, layer)
+            layer: _MarkerLayerAdapter(self._provider._store, layer)
             for layer in _VALID_LAYERS
         }
         self.profile = self.stores["profile"]
@@ -257,7 +256,7 @@ from .builtin.common import (  # noqa: E402, F401
     _normalize_layer,
 )
 from .builtin.provider import (  # noqa: E402, F401
-    _SQLiteLayerAdapter as LayeredMemoryStore,
+    _MarkerLayerAdapter as LayeredMemoryStore,
 )
 ProjectMemory = _ProjectMemory
 DailyNotes = _DailyNotes

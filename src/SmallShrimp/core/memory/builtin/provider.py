@@ -1,12 +1,11 @@
-"""Built-in SQLite-backed memory provider implementing MemoryProvider ABC."""
+"""Built-in memory provider: Markdown 文件真相源 + SQLite FTS5 索引。"""
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
 from ..provider import MemoryProvider
-from .store import SQLiteBackend
+from .file_store import MarkdownStore
 from .common import (
     MemoryLayer,
     MemoryRecord,
@@ -18,42 +17,39 @@ _PROFILE_LAYERS = {"profile"}
 _PREFETCH_LAYERS = {"facts", "projects", "reflections"}
 
 
-class _SQLiteLayerAdapter:
-    """将 SQLiteBackend 包装为 per-layer 接口。"""
+class _MarkerLayerAdapter:
+    """将 MarkdownStore 包装为 per-layer 接口。"""
 
-    def __init__(self, backend: SQLiteBackend, layer: MemoryLayer):
-        self._backend = backend
+    def __init__(self, store: MarkdownStore, layer: MemoryLayer):
+        self._store = store
         self._layer = layer
 
     def store(self, content: str, **kwargs: Any) -> MemoryRecord:
-        return self._backend.store(self._layer, content, **kwargs)
+        return self._store.store(self._layer, content, **kwargs)
 
     def search(self, query: str, limit: int = 10) -> list[MemoryRecord]:
-        return self._backend.search(query, layer=self._layer, limit=limit)
+        return self._store.search(query, layer=self._layer, limit=limit)
 
     def list_all(self) -> list[MemoryRecord]:
-        return self._backend.list_all(layer=self._layer)
+        return self._store.list_all(layer=self._layer)
 
     def delete(self, record_id: str) -> bool:
-        return self._backend.delete(record_id)
-
-    def consolidate(self, threshold: float = 0.8) -> int:
-        return self._backend.consolidate(threshold=threshold, layer=self._layer)
+        return self._store.delete(record_id)
 
 
 class BuiltinProvider(MemoryProvider):
-    """内置 SQLite 存储后端。
+    """内置存储后端：Markdown 文件真相源 + SQLite FTS5 索引。
 
-    用 SQLite 管理 5 层记忆，支持快照缓存和按需召回。
-    外部第三方 Provider（如 Mem0/Honcho）可通过 MemoryProvider ABC 接入。
+    所有记忆以 .md 文件存储在 memory_dir 中，用户可直接编辑。
+    SQLite 仅为检索加速，索引丢失不影响记忆。
     """
 
     def __init__(self, memory_dir: Path) -> None:
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        self._db = SQLiteBackend(memory_dir / "memory.db")
+        self._store = MarkdownStore(memory_dir)
         self._stores = {
-            layer: _SQLiteLayerAdapter(self._db, layer)
+            layer: _MarkerLayerAdapter(self._store, layer)
             for layer in VALID_MEMORY_LAYERS
         }
         self._snapshot_profile: list[MemoryRecord] | None = None
@@ -66,12 +62,12 @@ class BuiltinProvider(MemoryProvider):
         return self.memory_dir.exists()
 
     def close(self) -> None:
-        self._db.close()
+        self._store.close()
 
     # ── 生命周期 ────────────────────────────────────────
 
     def initialize(self, session_id: str) -> None:
-        """初始化会话级缓存快照。"""
+        """初始化缓存快照。"""
         self._snapshot_profile = self._stores["profile"].list_all()[:20]
 
     def shutdown(self) -> None:
@@ -80,7 +76,7 @@ class BuiltinProvider(MemoryProvider):
     # ── System Prompt ───────────────────────────────────
 
     def system_prompt_block(self) -> str:
-        """返回缓存的 Profile 快照，不查库。"""
+        """返回缓存的 Profile 快照。"""
         if not self._snapshot_profile:
             return ""
         lines = ["## User Profile\n"]
@@ -89,30 +85,26 @@ class BuiltinProvider(MemoryProvider):
         return "\n".join(lines)
 
     def refresh_snapshot(self) -> None:
-        """重新从数据库加载快照（跨会话时调用）。"""
+        """重新从索引加载快照。"""
         self._snapshot_profile = self._stores["profile"].list_all()[:20]
 
     # ── 前置召回 ────────────────────────────────────────
 
     def prefetch(self, query: str, session_id: str = "") -> list[dict]:
-        """按需召回 facts/projects/reflections 三层（当前简单实现）。"""
+        """按需召回 facts/projects/reflections。"""
         results: list[dict] = []
         for layer in _PREFETCH_LAYERS:
             results.extend(self._stores[layer].search(query, limit=5))
-        results.sort(key=lambda r: r.get("importance", 0), reverse=True)
+        results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
         return results[:5]
 
     # ── 后置同步 ────────────────────────────────────────
 
     def sync_turn(self, user_content: str, assistant_content: str,
                   session_id: str = "", messages: list[dict] | None = None) -> None:
-        """持久化本轮对话到 sessions 层。"""
+        """写入每日日志。"""
         summary = f"User: {user_content[:200]}\nAssistant: {assistant_content[:200]}"
-        self._stores["sessions"].store(
-            summary,
-            source="auto",
-            importance=3,
-        )
+        self._store.store_daily(summary=summary)
 
     # ── 存储接口 ────────────────────────────────────────
 
@@ -122,13 +114,14 @@ class BuiltinProvider(MemoryProvider):
 
     def search(self, query: str, layer: str | None = None, **kwargs: Any) -> list[dict]:
         limit = kwargs.get("limit", 10)
+        use_hrr = kwargs.get("use_hrr", False)
         if layer:
             normalized = _normalize_layer(layer)
             return self._stores[normalized].search(query, limit=limit)
         results: list[dict] = []
-        for l in _PREFETCH_LAYERS:
+        for l in VALID_MEMORY_LAYERS:
             results.extend(self._stores[l].search(query, limit=limit))
-        results.sort(key=lambda r: r.get("importance", 0), reverse=True)
+        results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
         return results[:limit]
 
     def list_all(self, layer: str | None = None, **kwargs: Any) -> list[dict]:
@@ -149,6 +142,6 @@ class BuiltinProvider(MemoryProvider):
                 return True
         return False
 
-    def consolidate(self, layers: Iterable[str] | None = None, threshold: float = 0.8) -> int:
-        selected = [_normalize_layer(l) for l in layers] if layers else ["facts", "projects", "reflections", "sessions"]
-        return sum(self._stores[l].consolidate(threshold=threshold) for l in selected)
+    def reindex(self) -> int:
+        """全量重建索引。"""
+        return self._store.reindex()
