@@ -21,6 +21,12 @@ from .common import (
     _normalize_layer,
     _new_memory_id,
 )
+from .hybrid_search import (
+    setup_vector_table,
+    insert_vector,
+    hybrid_search as _hybrid_search,
+    _HAS_SQLITE_VEC,
+)
 
 # ── jieba 分词（可选依赖） ────────────────────────────────
 
@@ -112,6 +118,15 @@ class MarkdownStore:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_FTS_SCHEMA)
 
+        # 向量表（如果可用）
+        self._has_vector = False
+        if _HAS_SQLITE_VEC:
+            try:
+                setup_vector_table(self._conn)
+                self._has_vector = True
+            except Exception:
+                pass
+
         # 确保所有层对应的 .md 文件存在
         for layer in ["profile", "facts", "projects", "reflections"]:
             path = _file_path(memory_dir, layer)
@@ -163,6 +178,9 @@ class MarkdownStore:
             "INSERT INTO memory_fts(rowid, content_jieba, content_raw) VALUES (?, ?, ?)",
             (cur.lastrowid, seg, content),
         )
+        # 同步向量（如果可用）
+        if self._has_vector:
+            insert_vector(self._conn, cur.lastrowid, content)
         self._conn.commit()
 
         return {
@@ -206,30 +224,35 @@ class MarkdownStore:
 
     def search(self, query: str, layer: str | None = None, limit: int = 10,
                use_hrr: bool = False) -> list[MemoryRecord]:
-        """FTS5 + jieba 分词检索。"""
+        """混合检索: FTS5 + 向量（可选）+ MMR + 时间衰减。"""
         if not query.strip():
             return []
 
-        params: list[Any] = []
-        layer_clause = ""
-        if layer:
-            normalized = _normalize_layer(layer)
-            layer_clause = "AND mi.layer = ?"
-            params.append(normalized)
+        # jieba OR 查询
+        fts_q = _expand_query_jieba(query)
 
-        fts_query = _expand_query_jieba(query)
-        rows = self._conn.execute(
-            f"""SELECT mi.id, mi.file_path, mi.layer, mi.content, mi.bullet,
-                       mi.created_at, mi.updated_at,
-                       fts.rank
-                FROM memory_fts fts
-                JOIN memory_index mi ON mi.id = fts.rowid
-                WHERE memory_fts MATCH ?
-                  {layer_clause}
-                ORDER BY fts.rank
-                LIMIT ?""",
-            [fts_query] + params + [limit],
-        ).fetchall()
+        # 混合检索
+        results = _hybrid_search(
+            conn=self._conn,
+            query=query,
+            layer=layer,
+            limit=limit,
+            fts_query=fts_q,
+            use_vector=self._has_vector,
+        )
+
+        # 补齐 memory_index 中的字段
+        for r in results:
+            info = self._conn.execute(
+                "SELECT file_path, bullet, updated_at FROM memory_index WHERE id = ?",
+                (r["id"],),
+            ).fetchone()
+            if info:
+                r["file_path"] = info[0]
+                r["bullet"] = info[1]
+                r["updated_at"] = info[2]
+
+        return results
 
         results = []
         for row in rows:
