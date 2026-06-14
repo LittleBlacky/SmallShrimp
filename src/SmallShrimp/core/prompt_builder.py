@@ -60,10 +60,9 @@ class PromptBuilder:
         if self._cached_bootstrap:
             layers.append(self._cached_bootstrap)
 
-        # ── L5: User Profile snapshot (from MemoryProvider cache, no DB) ──
-        memory_block = self._build_profile_block(state)
-        if memory_block:
-            layers.append(memory_block)
+        # ── L5: MemoryProvider session-tier blocks (frozen per session) ──
+        for b in self._build_memory_blocks(state, "session"):
+            layers.append(b)
 
         # ── L4: Channel hint (per-turn, at tail, doesn't break prefix cache) ──
         if state.source is not None:
@@ -116,12 +115,14 @@ class PromptBuilder:
 
         return "\n\n".join(parts)
 
-    def _build_profile_block(self, state: "SessionState") -> str:
-        """Get profile snapshot from MemoryProvider cache, no DB query."""
+    def _build_memory_blocks(self, state: "SessionState", tier: str) -> list[str]:
+        """从 MemoryProvider 获取指定缓存层级的内容块。"""
         memory_manager = getattr(state.agent, "memory_manager", None)
         if memory_manager is None:
-            return ""
-        return memory_manager.system_prompt_block()
+            return []
+        from .memory.provider import PromptBlock
+        blocks = memory_manager.get_prompt_blocks()
+        return [f"## {b.name}\n\n{b.content}" for b in blocks if b.cache_tier == tier]
 
     def _build_channel_hint(self, source: "EventSource") -> str:
         """Build platform/channel hint for the agent."""

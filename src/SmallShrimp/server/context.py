@@ -49,7 +49,7 @@ class Context:
         from ..core.eventbus import EventBus
         from ..core.commands.registry import CommandRegistry
         from ..core.prompt_builder import PromptBuilder
-        from ..core.memory import MemoryManager
+        from ..core.memory import create_memory_manager
         from ..core.cron_loader import CronLoader
         from ..tools import create_tool_registry
         from ..channels import create_channels_from_config
@@ -61,7 +61,7 @@ class Context:
         skill_loader = SkillLoader(workspace / "skills")
         history_manager = HistoryManager(workspace / "sessions")
         prompt_builder = PromptBuilder(workspace)
-        memory_manager = MemoryManager(workspace / "memories")
+        memory_manager = create_memory_manager(config.data)
         cron_loader = CronLoader(workspace / "crons")
 
         # 事件总线

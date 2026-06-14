@@ -24,9 +24,14 @@ class CommandContext:
     @property
     def memory(self) -> MemoryManager:
         if self._memory_manager is None:
-            from pathlib import Path
             agent_memory = getattr(self.session.agent, "memory_manager", None)
-            self._memory_manager = agent_memory or MemoryManager(Path("workspace/memories"))
+            self._memory_manager = agent_memory
+        return self._memory_manager
+
+    def refresh_memory(self, config: dict | None = None) -> MemoryManager:
+        """从配置重新创建 MemoryManager（用于热重载后刷新）。"""
+        from ..memory import create_memory_manager
+        self._memory_manager = create_memory_manager(config or {})
         return self._memory_manager
 
 @register_command(name="skill", description="加载技能内容", usage="/skill <name>")

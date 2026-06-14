@@ -181,8 +181,8 @@ class AgentSession:
             # HIGH 置信度纠正 → 自动写 profile
             if correction.confidence == CorrectionConfidence.HIGH and self.agent.memory_manager:
                 try:
-                    self.agent.memory_manager.remember_profile(
-                        correction.phrase, source="correction"
+                    self.agent.memory_manager.store(
+                        "profile", correction.phrase, source="correction"
                     )
                 except Exception:
                     pass
@@ -273,8 +273,8 @@ class AgentSession:
                 self.state.add_message(SystemMessage(content=note))
                 if self.agent.memory_manager:
                     try:
-                        self.agent.memory_manager.remember_reflection(
-                            note, importance=7, source="failure_learner"
+                        self.agent.memory_manager.store(
+                            "reflections", note, importance=7, source="failure_learner"
                         )
                     except Exception:
                         pass

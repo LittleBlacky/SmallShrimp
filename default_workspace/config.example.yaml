@@ -45,3 +45,11 @@ default_agent: pickle
 #     bot_token: your-bot-token
 #     allowed_user_ids:
 #       - "your_user_id"
+
+# memory:
+#   # 向量检索（可选，需安装额外依赖）
+#   use_vector: false
+#   # embedding 后端：local / api://模型名
+#   #   "local" → sentence-transformers (all-MiniLM-L6-v2, 384d)
+#   #   "api://text-embedding-3-small" → OpenAI 兼容 API
+#   embedding: null
