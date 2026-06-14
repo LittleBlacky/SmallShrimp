@@ -27,11 +27,11 @@ _STOP_WORDS = frozenset({
 # ── 显式话题切换信号 ──────────────────────────────
 
 _TOPIC_SWITCH_SIGNALS: list[tuple[str, int]] = [
-    (r"换(个|一(个|下))?话题", 0),           # "换个话题"
-    (r"回到?刚[才刚]", 0),                    # "回到刚才"/"回刚才"
-    (r"之前的[那个话题]", 0),                 # "之前的话题"
-    (r"刚[才刚]说(的|过)?的", 0),           # "刚才说的"/"刚说过的"
-    (r"刚[才刚]那[个]", 0),                  # "刚才那个"
+    (r"换(个|一(个|下))?话题", 0),           # "换个话题" → 创建新话题
+    (r"回到?刚[才刚]", 1),                    # "回到刚才" → 回溯到上一个话题
+    (r"之前的[那个话题]", 1),                 # "之前的话题"
+    (r"刚[才刚]说(的|过)?的", 1),           # "刚才说的"/"刚说过的"
+    (r"刚[才刚]那[个]", 1),                  # "刚才那个"
     (r"先(不管|不说|放着)", 0),              # "先不管那个"
     (r"skip|next|next topic", 0),
 ]
@@ -46,11 +46,18 @@ _COMMON_VERBS = frozenset({
     "帮我写", "帮我做", "帮我看看", "我问问", "我需要", "我要求",
     "我建议", "我觉得", "我认为", "我认",
     "我查一", "我查一", "查一下", "一下", "一下北", "下北",
+    # 话题切换信号词
+    "换个话题", "换个话", "回到刚才", "回到刚", "回到",
+    "换个", "个话", "才那", "那话", "刚说", "说过的",
+    "先不管", "先不说", "先放着", "话题",
 })
 
 
 def _tokenize(text: str) -> set[str]:
-    """字符 bigram + 英文词，用于弱连续性检测。"""
+    """字符 bigram + 英文词，用于弱连续性检测。
+    
+    过滤掉常见句式词（'帮我'、'我查'等）产生的误匹配 bigram。
+    """
     tokens: set[str] = set()
     for part in re.findall(r'[a-zA-Z]+', text):
         word = part.lower()
@@ -62,7 +69,7 @@ def _tokenize(text: str) -> set[str]:
             tokens.add(c)
     for i in range(len(chars) - 1):
         bg = chars[i] + chars[i + 1]
-        if bg not in _STOP_WORDS:
+        if bg not in _STOP_WORDS and bg not in _COMMON_VERBS:
             tokens.add(bg)
     return tokens
 
@@ -109,7 +116,7 @@ class TopicSegmenter:
     3. bigram 弱连续 → 归入当前活跃话题
     """
 
-    BIGRAM_THRESHOLD = 0.08      # bigram 阈值，显著重叠才匹配
+    BIGRAM_THRESHOLD = 0.10      # bigram 阈值，显著重叠才匹配
     MAX_ACTIVE_TOPICS = 5
 
     def __init__(self, threshold: float = BIGRAM_THRESHOLD):
@@ -126,16 +133,22 @@ class TopicSegmenter:
     # ── 话题检测（主入口） ───────────────────────────
 
     def detect_topic(self, text: str) -> tuple[int, str, float]:
-        """检测文本所属的话题。返回 (index, method, score)。"""
+        """检测文本所属的话题。返回 (index, method, score)。
+        
+        index=-1 表示新话题。signal 中:
+          - back_n=0 → 创建新话题（"换个话题"）
+          - back_n=1 → 回溯到上一个话题（"回到刚才"）
+        """
         text_lower = text.lower().strip()
 
         # 策略 1: 显式话题切换信号
         for pattern, back_n in _TOPIC_SWITCH_SIGNALS:
             if re.search(pattern, text_lower):
-                if back_n == 0 and self._active_idx >= 0:
-                    prev = self._active_idx - 1
-                    return (prev, "signal", 1.0) if prev >= 0 else (self._active_idx, "signal", 1.0)
-                return self._active_idx, "signal", 1.0
+                if back_n == 1 and self._active_idx >= 1:
+                    # 回到上一个话题
+                    return self._active_idx - 1, "signal", 1.0
+                # back_n == 0 → 创建新话题
+                return -1, "signal", 1.0
 
         tokens = _tokenize(text)
         keywords = _extract_keywords(text)
@@ -166,7 +179,13 @@ class TopicSegmenter:
         if best_idx >= 0 and best_score >= self.threshold:
             return best_idx, "bigram", best_score
 
-        # 策略 4: 如果当前活跃话题只有它自己（无其他话题可切），保持连续性
+        # 策略 4: 如果当前活跃话题是空的占位话题（signal 创建还未填内容），强制分配给该话题
+        if (self._active_idx >= 0
+                and self.segments[self._active_idx].message_count == 0
+                and self.segments[self._active_idx].label == "新话题"):
+            return self._active_idx, "continuity", 0.0
+
+        # 策略 5: 如果只有唯一话题，保持连续性
         if self._active_idx >= 0 and len(self.segments) == 1:
             return self._active_idx, "continuity", 0.0
 
@@ -182,13 +201,23 @@ class TopicSegmenter:
         is_new_topic = idx < 0
 
         if is_new_topic:
-            label = self._infer_label(user_content)
+            # 判断是否是纯信号消息（匹配整个文本是话题切换语句）
+            _is_signal_only = False
+            if method == "signal":
+                for pat, _ in _TOPIC_SWITCH_SIGNALS:
+                    if re.search(pat, user_content.lower().strip()):
+                        _is_signal_only = True
+                        break
+            if _is_signal_only:
+                label = "新话题"
+            else:
+                label = self._infer_label(user_content)
             seg = TopicSegment(
                 id=f"topic_{len(self.segments)}",
                 label=label,
                 keywords=_extract_keywords(user_content),
                 tokenized=_tokenize(user_content),
-                message_count=1,
+                message_count=1 if not _is_signal_only else 0,
                 last_active=now,
             )
             self.segments.append(seg)
@@ -197,7 +226,11 @@ class TopicSegmenter:
             seg = self.segments[idx]
             seg.message_count += 1
             seg.last_active = now
-            seg.keywords |= _extract_keywords(user_content)
+            # 如果话题还是占位标签且新消息有实质内容, 更新标签
+            new_kw = _extract_keywords(user_content)
+            if seg.label == "新话题" and new_kw:
+                seg.label = self._infer_label(user_content)
+            seg.keywords |= new_kw
             seg.tokenized |= _tokenize(user_content)
             self._active_idx = idx
 
