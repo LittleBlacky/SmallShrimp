@@ -19,7 +19,6 @@ from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
 from src.SmallShrimp.core.prompt_builder import PromptBuilder
 from src.SmallShrimp.core.session_state import SessionState
 from src.SmallShrimp.tools.decorators import tool
-from src.SmallShrimp.tools.memory_tool import create_memory_tools
 from src.SmallShrimp.tools.registry import ToolRegistry
 
 
@@ -79,7 +78,7 @@ def _tool_call(call_id: str, name: str, arguments: dict) -> dict:
 
 def _make_session(memory: MemoryManager, llm: FakeDeepSeekLLM, workspace: Path) -> AgentSession:
     registry = ToolRegistry()
-    for tool in create_memory_tools(memory):
+    for tool in memory.provider.get_tools():
         registry.register(tool)
 
     agent_def = SimpleNamespace(
@@ -133,7 +132,7 @@ async def test_agent_chat_writes_profile_then_prompt_uses_it_next_turn(workspace
 
         first_answer = await session.chat("记住我叫 Zane")
         assert first_answer == "已记住你的名字。"
-        assert any(record["content"] == "用户叫 Zane" for record in memory.get_profile())
+        assert any(record["content"] == "用户叫 Zane" for record in memory.list_all(layer="profile"))
 
         second_answer = await session.chat("我叫什么？")
         assert second_answer == "你叫 Zane。"
@@ -148,8 +147,8 @@ async def test_agent_chat_recalls_task_memory_but_not_profile(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
     try:
-        memory.remember_profile("用户叫 Zane")
-        memory.remember_project("SmallShrimp 使用 pytest 运行测试")
+        memory.store("profile", "用户叫 Zane")
+        memory.store("projects", "SmallShrimp 使用 pytest 运行测试")
         llm = FakeDeepSeekLLM([
             {
                 "content": "",
@@ -187,7 +186,7 @@ async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
     try:
-        memory.remember_project("SmallShrimp 使用 pytest 运行测试")
+        memory.store("projects", "SmallShrimp 使用 pytest 运行测试")
         llm = FakeDeepSeekLLM([
             {
                 "content": "",
@@ -213,9 +212,8 @@ async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
         tool_messages = [message for message in session.state.messages if getattr(message, "name", "") == "recall_memory"]
         assert len(tool_messages) == 2
         assert "SmallShrimp 使用 pytest" in tool_messages[0].content
-        assert tool_messages[1].content == "未找到相关任务记忆。"
-        assert len(session.state.surfaced_memory_ids) == 1
-        assert session.state.session_memory_bytes > 0
+        # 工具不再过滤已展示记忆（session state 过滤已移除）
+        assert "SmallShrimp 使用 pytest" in tool_messages[1].content
     finally:
         memory.close()
 

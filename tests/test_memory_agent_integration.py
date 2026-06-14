@@ -26,8 +26,8 @@ def _make_agent(mem, toolbox):
 
 
 def _register(mem, toolbox):
-    from src.SmallShrimp.tools.memory_tool import create_memory_tools
-    for tool in create_memory_tools(mem):
+    provider = mem.provider
+    for tool in provider.get_tools():
         toolbox.register(tool)
 
 
@@ -52,7 +52,7 @@ def setup():
 class TestPrompt:
     def test_profile_in_prompt(self, setup, toolbox):
         mem, prompt_builder = setup
-        mem.remember_profile("用户叫 Zane")
+        mem.store("profile", "用户叫 Zane")
         mem.initialize("test-session")  # 初始化快照
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
@@ -63,7 +63,7 @@ class TestPrompt:
     def test_profile_placement(self, setup, toolbox):
         """Profile 位于 Bootstrap 之后、Channel 之前。"""
         mem, prompt_builder = setup
-        mem.remember_profile("用户叫 Zane")
+        mem.store("profile", "用户叫 Zane")
         mem.initialize("test-session")
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
@@ -77,8 +77,8 @@ class TestTools:
     async def test_recall_excludes_profile(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        mem.remember_profile("用户叫 Zane")
-        mem.remember_fact("用户喜欢 Python")
+        mem.store("profile", "用户叫 Zane")
+        mem.store("facts", "用户喜欢 Python")
         recall = toolbox.get("recall_memory")
         result = await recall.call(query="用户")
         assert result.success
@@ -92,7 +92,7 @@ class TestTools:
         tool = toolbox.get("remember_profile")
         result = await tool.call(content="用户叫 Zane")
         assert result.success and "用户画像" in result.content
-        assert any("Zane" in record["content"] for record in mem.get_profile())
+        assert any("Zane" in record["content"] for record in mem.list_all(layer="profile"))
 
     @pytest.mark.asyncio
     async def test_remember_fact(self, setup, toolbox):
@@ -118,10 +118,11 @@ class TestTools:
 class TestE2E:
     def test_cross_session(self, setup, toolbox):
         mem, _ = setup
-        mem.remember_profile("用户叫 Zane")
-        mem.remember_fact("喜欢 Python")
-        new_mem = MemoryManager(mem.memory_dir)
-        assert any("Zane" in record["content"] for record in new_mem.get_profile())
+        mem.store("profile", "用户叫 Zane")
+        mem.store("facts", "喜欢 Python")
+        # 用同一路径新建 MemoryManager（跨会话模拟）
+        new_mem = MemoryManager(mem.provider.memory_dir)
+        assert any("Zane" in record["content"] for record in new_mem.list_all(layer="profile"))
         assert any("Python" in record["content"] for record in new_mem.recall("Python"))
 
     @pytest.mark.asyncio
