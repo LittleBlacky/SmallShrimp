@@ -63,6 +63,7 @@ _LAYER_TO_FILE: dict[str, str] = {
     "facts": "facts.md",
     "projects": "projects.md",
     "reflections": "reflections.md",
+    "constraints": "constraints.md",
     "sessions": None,  # sessions 用 daily/
 }
 
@@ -139,7 +140,7 @@ class MarkdownStore:
                 self._has_vector = False
 
         # 确保所有层对应的 .md 文件存在
-        for layer in ["profile", "facts", "projects", "reflections"]:
+        for layer in ["profile", "facts", "projects", "reflections", "constraints"]:
             path = _file_path(memory_dir, layer)
             if not path.exists():
                 path.write_text(f"# {_FILE_HEADERS.get(layer, layer)}\n\n", encoding="utf-8")
@@ -375,6 +376,7 @@ _FILE_HEADERS = {
     "facts": "知识",
     "projects": "项目上下文",
     "reflections": "经验教训",
+    "constraints": "硬性约束（不参与压缩）",
 }
 
 

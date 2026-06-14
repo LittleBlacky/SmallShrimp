@@ -54,6 +54,8 @@ class BuiltinProvider(MemoryProvider):
                      searchable=True, inject=None)
     reflections = Layer("reflections", "经验教训（每轮自动召回，优先级高）",
                         searchable="auto", inject=None)
+    constraints = Layer("constraints", "硬性约束（不参与压缩，每轮强制注入）",
+                        searchable=True, inject="session")
 
     def __init__(self, memory_dir: Path, use_vector: bool = False,
                  embedding_config: str | None = None,
@@ -86,6 +88,7 @@ class BuiltinProvider(MemoryProvider):
             for layer in VALID_MEMORY_LAYERS
         }
         self._snapshot_profile: list[MemoryRecord] | None = None
+        self._snapshot_constraints: list[MemoryRecord] | None = None
 
     @property
     def name(self) -> str:
@@ -102,9 +105,11 @@ class BuiltinProvider(MemoryProvider):
     def initialize(self, session_id: str) -> None:
         """初始化缓存快照。"""
         self._snapshot_profile = self._stores["profile"].list_all()[:20]
+        self._snapshot_constraints = self._stores["constraints"].list_all()
 
     def shutdown(self) -> None:
         self._snapshot_profile = None
+        self._snapshot_constraints = None
 
     # ── System Prompt ───────────────────────────────────
 
@@ -117,16 +122,34 @@ class BuiltinProvider(MemoryProvider):
             for r in self._snapshot_profile:
                 lines.append(f"- {r['content']}")
             return "\n".join(lines)
+        if layer == "constraints":
+            if not self._snapshot_constraints:
+                return ""
+            lines = []
+            for r in self._snapshot_constraints:
+                lines.append(f"- {r['content']}")
+            return "\n".join(lines)
         return ""
 
     def get_prompt_blocks(self) -> list[PromptBlock]:
-        """返回要注入 system prompt 的内容块。"""
-        if not self._snapshot_profile:
-            return []
-        lines = [f"## User Profile\n"]
-        for r in self._snapshot_profile:
-            lines.append(f"- {r['content']}")
-        return [PromptBlock("User Profile", "\n".join(lines), cache_tier="session")]
+        """返回要注入 system prompt 的内容块。constraints 优先级最高。"""
+        blocks: list[PromptBlock] = []
+
+        # Constraints — 最高优先级，始终注入
+        if self._snapshot_constraints:
+            lines = [f"## 硬性约束 Hard Constraints\n"]
+            for r in self._snapshot_constraints:
+                lines.append(f"- {r['content']}")
+            blocks.append(PromptBlock("Hard Constraints", "\n".join(lines), cache_tier="session"))
+
+        # Profile
+        if self._snapshot_profile:
+            lines = [f"## User Profile\n"]
+            for r in self._snapshot_profile:
+                lines.append(f"- {r['content']}")
+            blocks.append(PromptBlock("User Profile", "\n".join(lines), cache_tier="session"))
+
+        return blocks
 
     def system_prompt_block(self) -> str:
         """（旧接口）返回缓存的 Profile 快照。"""
@@ -136,6 +159,7 @@ class BuiltinProvider(MemoryProvider):
     def refresh_snapshot(self) -> None:
         """重新从索引加载快照。"""
         self._snapshot_profile = self._stores["profile"].list_all()[:20]
+        self._snapshot_constraints = self._stores["constraints"].list_all()
 
     # ── 前置召回 ────────────────────────────────────────
 
@@ -229,9 +253,14 @@ class BuiltinProvider(MemoryProvider):
             record = store.store("reflections", content, importance=importance)
             return f"已保存反思记忆: {record['content']}"
 
+        @tool(description="保存硬性约束（预算、禁止项、必须条件）。约束不参与压缩，每轮强制注入上下文。用于保存'不含坚果''预算不超过500'等关键限制。")
+        async def remember_constraint(content: str) -> str:
+            record = store.store("constraints", content, importance=10)
+            return f"已保存硬性约束: {record['content']}"
+
         @tool(description="扫描并合并 facts/projects/reflections 中的相似记录；不会合并用户画像。")
         async def consolidate_memories(threshold: float = 0.8) -> str:
             count = self.consolidate(threshold=threshold)
             return f"合并了 {count} 对相似记忆。" if count else "没有找到可合并的记忆。"
 
-        return [recall_memory, remember_profile, remember_fact, remember_project, remember_reflection, consolidate_memories]
+        return [recall_memory, remember_profile, remember_fact, remember_project, remember_reflection, remember_constraint, consolidate_memories]

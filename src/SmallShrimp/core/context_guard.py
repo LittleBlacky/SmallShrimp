@@ -30,20 +30,47 @@ SNIP_THRESHOLD = 0.60             # snip when >60% context full
 KEEP_RECENT_RESULTS = 3           # keep last N tool results
 MICROCOMPACT_IDLE_SECONDS = 60
 
-COMPACT_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
+COMPACT_PROMPT = """Your task is to create a structured summary of the conversation. Different types of information require different handling strategies:
 
-Your summary should include:
-1. Primary Request and Intent
-2. Key Facts and User Preferences
-3. User Messages (ALL user messages)
-4. Errors and Corrections
-5. Current Work and Pending Tasks
+## CRITICAL: Information Preservation Rules
+
+### MUST Preserve Verbatim (copy-paste, do NOT paraphrase or summarize):
+- **Negative constraints**: "don't X", "must not X", "cannot X", "forbidden X", "avoid X"
+- **Numeric constraints**: budgets, dates, quantities, version numbers, size limits
+- **Hard requirements**: "must support X", "required: X", "only if X"
+- **User identity**: names, roles, contact info, account IDs
+
+### CAN Summarize (compress to gist):
+- Discussion flow, reasoning steps, exploration
+- Tool results that are already captured in decisions
+- Background context and explanations
+
+### CAN Drop (omit entirely):
+- Pleasantries: "thank you", "ok", "got it", "sure"
+- Redundant confirmations
+- Empty or near-empty messages
+
+## Output Format
+
+```
+## 硬性约束 Hard Constraints (Verbatim)
+- [copy each constraint exactly as stated, one per line]
+
+## 关键决策 Key Decisions
+- [what was decided, by whom]
+
+## 对话摘要 Conversation Summary
+- [compressed narrative of what happened]
+
+## 待解决 Pending Items
+- [unresolved questions or tasks]
+```
 
 Here is the conversation to summarize:
 
 {conversation}
 
-Please provide your summary following this structure."""
+Output your summary strictly following the format above. Constraints section MUST contain the EXACT original text without any rewording."""
 
 
 class ContextGuard:

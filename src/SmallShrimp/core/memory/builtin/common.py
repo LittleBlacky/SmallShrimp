@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 from typing import Literal, TypedDict
 
 
-MemoryLayer = Literal["profile", "facts", "projects", "reflections", "sessions"]
+MemoryLayer = Literal["profile", "facts", "projects", "reflections", "sessions", "constraints"]
 
 VALID_MEMORY_LAYERS: tuple[MemoryLayer, ...] = (
     "profile",
@@ -17,6 +17,7 @@ VALID_MEMORY_LAYERS: tuple[MemoryLayer, ...] = (
     "projects",
     "reflections",
     "sessions",
+    "constraints",
 )
 
 
@@ -64,6 +65,8 @@ def _normalize_layer(layer: str | None) -> MemoryLayer:
         "session": "sessions",
         "profile": "profile",
         "user_profile": "profile",
+        "constraint": "constraints",
+        "constrain": "constraints",
     }
     normalized = aliases.get(normalized, normalized)
     return normalized if normalized in VALID_MEMORY_LAYERS else "facts"
