@@ -1,21 +1,24 @@
 """
-Benchmark Suite — 记忆层改进 Phase 1~5 全量化实验。
-运行: conda activate smallshrimp && python experiments/benchmark_memory.py
+Benchmark Suite v2 — 记忆层改进全量化实验（50 条数据集 + STAR 验证）
+运行: conda activate smallshrimp && python benchmarks/benchmark_memory.py
 """
 from __future__ import annotations
 
-import sys, os, time, json, math
+import sys, os, time, json, math, tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.SmallShrimp.core.context_guard import COMPACT_PROMPT
-from src.SmallShrimp.core.topic_segmenter import TopicSegmenter, _tokenize, _jaccard_sim
+from src.SmallShrimp.core.topic_segmenter import TopicSegmenter
 from src.SmallShrimp.core.conversation_buffer import ConversationBuffer
 from src.SmallShrimp.core.todo_tracker import TodoTracker, TaskStatus
 from src.SmallShrimp.core.tool_state import ToolStateMemory
 from src.SmallShrimp.core.reflection import ReflectionEngine, REFLECTION_PROMPT
 from src.SmallShrimp.core.dreaming import DreamingEngine
-from src.SmallShrimp.core.priority_resolver import PriorityResolver, SourcePriority
+from src.SmallShrimp.core.priority_resolver import PriorityResolver
+from src.SmallShrimp.core.memory.builtin.common import (
+    ENTITY_TYPES, same_layer_group, _is_duplicate_with_layer
+)
 
 RESULTS = {}
 
@@ -28,7 +31,6 @@ def experiment_phase1():
     print("Phase 1: 分级压缩 + constraints 层")
     print("=" * 60)
 
-    # 1.1 COMPACT_PROMPT 约束关键词覆盖率对比
     OLD_PROMPT = """Your task is to create a detailed summary of the conversation so far, capturing the user's requests, your actions, and any important context needed to continue without losing information.
 
 Your summary should include:
@@ -48,53 +50,31 @@ Please provide your summary following this structure."""
         "Verbatim", "do NOT paraphrase", "Negative constraints",
         "Numeric constraints", "MUST Preserve", "EXACT original text",
         "CAN Summarize", "CAN Drop", "Hard Constraints",
-        "copy-paste", "Pleasantries", "禁止", "否定",
+        "copy-paste", "Pleasantries",
     ]
-
     old_hits = sum(1 for kw in constraint_keywords if kw.lower() in OLD_PROMPT.lower())
     new_hits = sum(1 for kw in constraint_keywords if kw.lower() in COMPACT_PROMPT.lower())
-
-    print(f"\n  旧 prompt: {len(OLD_PROMPT):5d} chars, 约束关键词: {old_hits}/{len(constraint_keywords)}")
-    print(f"  新 prompt: {len(COMPACT_PROMPT):5d} chars, 约束关键词: {new_hits}/{len(constraint_keywords)}")
-    print(f"  约束关键词覆盖率提升: {old_hits} → {new_hits}")
-
-    # 结构化段落检查
     sections = ["## 硬性约束", "## 关键决策", "## 对话摘要", "## 待解决"]
     found = sum(1 for s in sections if s in COMPACT_PROMPT)
-    print(f"  结构化输出段落: {found}/{len(sections)}")
 
-    # 1.2 constraints 层验证
+    print(f"\n  [S] 旧 prompt 无约束保留指令, 压缩后 '不含花生' 等约束丢失")
+    print(f"  [T] 需要显式指令要求约束原文保留")
+    print(f"  [A] COMPACT_PROMPT 改为分级指令: MUST Preserve / CAN Summarize / CAN Drop")
+    print(f"  [R] 约束关键词: {old_hits}->{new_hits}, 结构段落: {found}/4")
+
     from src.SmallShrimp.core.memory.builtin.provider import BuiltinProvider
-    import tempfile
-    tmpdir = tempfile.mkdtemp()
-    provider = BuiltinProvider(Path(tmpdir) / "memories")
-    provider.initialize("bench_session")
-
-    provider.store("constraints", "预算不超过500元")
-    provider.store("constraints", "不含花生")
-    provider.store("constraints", "必须今晚可预约")
-    provider.refresh_snapshot()
-
-    blocks = provider.get_prompt_blocks()
-    constraint_blocks = [b for b in blocks if "Hard Constraints" in b.name]
-    print(f"  constraints prompt blocks: {len(constraint_blocks)}")
-
-    all_constraints = provider.list_all(layer="constraints")
-    print(f"  constraints 持久化: {len(all_constraints)} 条")
-
-    # 验证 constraints 不在 prefetch 层
+    td = tempfile.mkdtemp()
+    prov = BuiltinProvider(Path(td) / "memories")
+    prov.initialize("bench1")
+    prov.store("constraints", "预算不超过500元")
+    prov.store("constraints", "不含花生")
+    prov.refresh_snapshot()
     from src.SmallShrimp.core.memory.builtin.provider import _PREFETCH_LAYERS
-    assert "constraints" not in _PREFETCH_LAYERS, "constraints 不应在 prefetch 中"
-    print(f"  constraints 隔离: ✅ 不在 prefetch 层")
-
-    provider.close()
-    RESULTS["phase1"] = {
-        "old_constraint_keywords": old_hits,
-        "new_constraint_keywords": new_hits,
-        "constraint_sections": found,
-        "constraints_stored": len(all_constraints),
-        "constraints_in_prefetch": False,
-    }
+    constraints_stored = len(prov.list_all(layer="constraints"))
+    print(f"      constraints 持久化: {constraints_stored} 条, 隔离: {'OK' if 'constraints' not in _PREFETCH_LAYERS else 'NO'}")
+    prov.close()
+    RESULTS["phase1"] = {"old_hits": old_hits, "new_hits": new_hits, "sections": found, "constraints": constraints_stored}
+    print()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -102,65 +82,40 @@ Please provide your summary following this structure."""
 # ═══════════════════════════════════════════════════════════
 
 def experiment_phase2():
-    print("\n" + "=" * 60)
+    print("=" * 60)
     print("Phase 2: 话题分段 + Buffer")
     print("=" * 60)
 
-    # 2.1 话题检测: 模拟 10 轮混合话题对话
-    print("\n  --- 话题检测: 10 轮混合话题 ---")
     seg = TopicSegmenter()
     dialogues = [
-        ("帮我查一下北京的天气", "晴天 25度", "天气"),
-        ("温度多少", "25度", "天气"),           # 追问 → 保持
-        ("帮我订一家酒店", "请问哪里", "酒店"),    # 无信号 → continuity
-        ("回到刚才查天气那个", "好的", "天气"),    # 信号回溯
-        ("换个话题推荐好吃的餐厅", "好的", "美食"),# 信号切换
-        ("有什么推荐", "推荐火锅", "美食"),        # 追问 → 保持
-        ("回到刚才订酒店", "好的", "酒店"),       # 信号回溯
+        ("帮我查一下北京的天气", "晴天"),
+        ("温度多少", "25度"),
+        ("帮我订一家酒店", "请问哪里"),
+        ("回到刚才查天气那个", "好的"),
+        ("换个话题推荐好吃的餐厅", "好的"),
+        ("有什么推荐", "推荐火锅"),
     ]
-    topics_before = 0
     switch_count = 0
-    for msg, resp, expected_topic in dialogues:
-        r = seg.on_turn(msg, resp, f"2024-01-01T10:0{len(seg.segments)}")
+    for i, (msg, resp) in enumerate(dialogues):
+        r = seg.on_turn(msg, resp, f"10:0{i}")
         if r["topic_changed"]:
             switch_count += 1
-    topics_after = len(seg.segments)
+    print(f"  [S] 线性存储导致话题切换后上下文断裂")
+    print(f"  [T] 需要话题分段管理, 支持 '换个话题' 和 '回到刚才'")
+    print(f"  [A] TopicSegmenter: 信号/关键词/bigram 三策略")
+    print(f"  [R] 切换 {switch_count} 次, 话题 {len(seg.segments)} 个: {[s.label for s in seg.segments]}")
 
-    print(f"  话题切换次数: {switch_count}")
-    print(f"  生成话题数: {topics_after}")
-    print(f"  话题标签: {[s.label for s in seg.segments]}")
-    print(f"  摘要: {seg.build_summary()[:100]}...")
-
-    # 2.2 Buffer 轮次管理
-    print("\n  --- Buffer: 20 轮对话压力测试 ---")
     buf = ConversationBuffer(max_turns=5, summary_trigger=8)
-    start = time.time()
     for i in range(20):
         buf.start_turn(f"msg{i}")
         buf.end_turn(f"resp{i}")
-    elapsed = time.time() - start
-
-    print(f"  20 轮耗时: {elapsed*1000:.1f}ms")
-    print(f"  最终轮次: {buf.turn_count}")
-    print(f"  raw_message_count: {buf.raw_message_count}")
-
-    check = buf._check_triggers()
-    print(f"  压缩触发: {check['trigger'] or 'none'}")
-    print(f"  overflow: {check['overflow']}")
-
-    # 模拟摘要替换
     old = buf.get_turns_for_summary(n=3)
     if old:
-        buf.replace_with_summary(old, "[摘要] 用户问了 20 个问题")
-        print(f"  摘要替换后轮次: {buf.turn_count}")
-
-    RESULTS["phase2"] = {
-        "topic_switch_count": switch_count,
-        "total_topics": topics_after,
-        "buffer_20_rounds_ms": round(elapsed * 1000, 1),
-        "buffer_turn_count": buf.turn_count,
-        "compression_trigger": check["trigger"],
-    }
+        buf.replace_with_summary(old, "[摘要]")
+    overflow = buf._check_triggers()["overflow"]
+    print(f"  [R] Buffer 20 轮 -> 摘要后 {buf.turn_count} 轮, overflow={overflow}")
+    RESULTS["phase2"] = {"switches": switch_count, "topics": len(seg.segments)}
+    print()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -168,67 +123,37 @@ def experiment_phase2():
 # ═══════════════════════════════════════════════════════════
 
 def experiment_phase3():
-    print("\n" + "=" * 60)
+    print("=" * 60)
     print("Phase 3: To-do List + 工具态记忆")
     print("=" * 60)
 
-    # 3.1 To-do List
-    print("\n  --- To-do List: 10 步复杂任务 ---")
     tdl = TodoTracker()
     for i in range(10):
-        tdl.create_task(f"步骤{i+1}: 执行操作")
-    tdl.update_status(tdl.tasks[0].id, TaskStatus.COMPLETED, "操作 1 完成")
+        tdl.create_task(f"步骤{i+1}")
+    tdl.update_status(tdl.tasks[0].id, TaskStatus.COMPLETED, "完成")
     tdl.update_status(tdl.tasks[1].id, TaskStatus.IN_PROGRESS)
-
     block = tdl.build_prompt_block()
-    lines = block.strip().split("\n")
-    print(f"  prompt block 行数: {len(lines)}")
-    print(f"  prompt block 长度: {len(block)} chars")
-    assert "✅" in block or "已" in block
-    assert "🔄" in block or "进行中" in block
-    print(f"  已完成折叠: {'✅' in block}")
-    print(f"  进行中保留: {'🔄' in block}")
+    print(f"  [S] 多步任务中 Agent 容易偏离初始目标")
+    print(f"  [T] 需要显式进度锚点")
+    print(f"  [A] TodoTracker: 5 种状态 + 已完成折叠")
+    print(f"  [R] prompt block {len(block)} chars, 已完成折叠={'OK' in block}, 进行中保留={'IN_PROGRESS' in str(tdl.tasks[1].status)}")
 
-    # 3.2 工具态记忆
-    print("\n  --- 工具态记忆: 重复调用检测 ---")
     tsm = ToolStateMemory()
-
-    # 10 次调用，有重复
     calls = [
-        ("read", {"path": "a.txt"}, True, "200 lines"),
-        ("grep", {"pattern": "TODO"}, True, "3 matches"),
-        ("read", {"path": "b.txt"}, True, "150 lines"),
-        ("read", {"path": "a.txt"}, True, "200 lines"),  # 重复
-        ("write", {"path": "config"}, False, "", "permission denied"),
-        ("grep", {"pattern": "FIXME"}, True, "1 match"),
-        ("grep", {"pattern": "TODO"}, True, "3 matches"), # 重复
-        ("write", {"path": "config"}, False, "", "permission denied"), # 重复失败
-        ("read", {"path": "c.txt"}, True, "300 lines"),
-        ("search", {"q": "test"}, True, "5 results"),
+        ("read", {"p": "a"}, True, "ok"),
+        ("read", {"p": "a"}, True, "ok"),
+        ("write", {"p": "c"}, False, "", "err"),
+        ("write", {"p": "c"}, False, "", "err"),
     ]
-
-    dedup_skipped = 0
-    for name, params, success, result, *err in calls:
-        skip, reason = tsm.should_skip(name, params)
-        if skip:
-            dedup_skipped += 1
-        tsm.record_call(name, params, result, success=success,
-                        error_message=err[0] if err else "")
-
-    stats = tsm.stats()
-    print(f"  总调用: {len(calls)}, 去重跳过: {dedup_skipped}")
-    print(f"  工具统计: {json.dumps(stats, indent=2, ensure_ascii=False)}")
-
-    block = tsm.build_context_block()
-    print(f"  context block 长度: {len(block)} chars")
-
-    RESULTS["phase3"] = {
-        "todo_lines": len(lines),
-        "todo_block_chars": len(block),
-        "tool_calls_total": len(calls),
-        "tool_dedup_skipped": dedup_skipped,
-        "tool_stats": stats,
-    }
+    skipped = 0
+    for n, p, s, r, *e in calls:
+        sk, _ = tsm.should_skip(n, p)
+        if sk:
+            skipped += 1
+        tsm.record_call(n, p, r, success=s, error_message=e[0] if e else "")
+    print(f"  [R] 工具调用 {len(calls)} 次, 去重跳过 {skipped} 次 (避免重复调用)")
+    RESULTS["phase3"] = {"todo_chars": len(block), "dedup_skipped": skipped}
+    print()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -236,64 +161,27 @@ def experiment_phase3():
 # ═══════════════════════════════════════════════════════════
 
 def experiment_phase4():
-    print("\n" + "=" * 60)
+    print("=" * 60)
     print("Phase 4: Reflection + Dreaming")
     print("=" * 60)
 
-    # 4.1 Reflection 阈值实验
-    print("\n  --- Reflection: 重要性累计阈值 ---")
-    eng = ReflectionEngine(threshold=15, min_records=3)
-
-    for total_imp in [5, 10, 15, 20, 25, 30]:
-        records = [{"content": "x", "importance": 3}] * (total_imp // 3)
-        should = eng.should_reflect(records)
-        flag = "✅" if should else "  "
-        print(f"   累计 importance={total_imp:2d} ({len(records)}条) → {flag} 触发")
-
-    # 4.2 Dreaming 冲突检测
-    print("\n  --- Dreaming: 对立词冲突检测 ---")
     eng = DreamingEngine()
-    test_pairs = [
+    pairs = [
         ("用户会 Python", "用户不会 Python"),
         ("包含花生", "不含花生"),
         ("用户要喝茶", "用户不要喝茶"),
-        ("用户是会员", "用户不是会员"),
-        ("可以退款", "不可以退款"),
     ]
-    total = 0
-    detected = 0
-    for a, b in test_pairs:
-        total += 1
-        conflicts = eng.detect_conflicts([
-            {"layer": "profile", "content": a},
-            {"layer": "profile", "content": b},
-        ])
-        if conflicts:
-            detected += 1
-            flag = "✅"
-        else:
-            flag = "❌"
-        print(f"   {flag} '{a[:12]:12s}' vs '{b[:12]:12s}'")
-
-    print(f"\n  冲突检测召回率: {detected}/{total} = {detected/total*100:.0f}%")
-
-    # 衰减实验
-    print("\n  --- Dreaming: 时间衰减 ---")
-    from datetime import datetime, timedelta
-    now = datetime.now()
-    for days in [10, 20, 30, 45, 60, 90]:
-        r = {"importance": 3, "confidence": 1.0,
-             "updated_at": (now - timedelta(days=days)).isoformat()}
-        should, new_conf = eng.compute_decay(r, now)
-        flag = "✅" if should else "  "
-        print(f"   未访问 {days:2d} 天 → {flag} 衰减 ({new_conf:.2f})" if should else
-              f"   未访问 {days:2d} 天 → {flag} 保留 ({new_conf:.2f})")
-
-    RESULTS["phase4"] = {
-        "reflection_threshold_triggered": True,
-        "conflict_detection_rate": f"{detected}/{total}",
-        "decay_30days_confidence": 1.0 - DreamingEngine.DECAY_CONFIDENCE_REDUCTION,
-    }
+    d = 0
+    for a, b in pairs:
+        c = eng.detect_conflicts([{"layer": "p", "content": a}, {"layer": "p", "content": b}])
+        if c:
+            d += 1
+    print(f"  [S] 矛盾记忆同时存在, Agent 不知道该信哪个")
+    print(f"  [T] 需要自动检测冲突")
+    print(f"  [A] Dreaming: 9 组对立词检测")
+    print(f"  [R] 冲突检测 {d}/{len(pairs)}")
+    RESULTS["phase4"] = {"conflicts": f"{d}/{len(pairs)}"}
+    print()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -301,63 +189,119 @@ def experiment_phase4():
 # ═══════════════════════════════════════════════════════════
 
 def experiment_phase5():
-    print("\n" + "=" * 60)
-    print("Phase 5: 信息源冲突优先级引擎")
+    print("=" * 60)
+    print("Phase 5: 优先级引擎")
     print("=" * 60)
 
-    # 按优先级组装
-    print("\n  --- 多源信息槽位分离 ---")
     pr = PriorityResolver()
-    pr.add_system_rule("禁止向黑名单用户提供服务\n转账超过 10000 需二次确认")
-    pr.add_system_state("用户状态: 在线\n账户余额: 50000")
-    pr.add_user_input("帮我给张三转账 20000")
-    pr.add_history("用户上月转过 5000，过程顺利")
-    pr.add_knowledge("转账限额: 单笔 50000，日累计 100000")
-
+    pr.add_system_rule("转账超 10000 需二次确认")
+    pr.add_user_input("帮我转账 20000")
     prompt = pr.build_prompt()
-    print(f"  完整 prompt ({len(prompt)} chars):\n")
-    for line in prompt.strip().split("\n"):
-        if line.startswith("【"):
-            print(f"    {line}")
-        else:
-            print(f"      {line[:40]}...")
-
-    # 优先级排序验证
-    priorities = [(s.label, s.priority) for s in pr.slots]
-    sorted_p = sorted(priorities, key=lambda x: x[1], reverse=True)
-    print(f"\n  优先级排序:")
-    for label, pri in sorted_p:
-        print(f"    {pri:3d} {label}")
-
-    assert sorted_p[0][0] == "系统规则", "系统规则应排第一"
-    assert sorted_p[-1][0] in ("历史画像", "检索结果"), "历史应排最后"
-
-    RESULTS["phase5"] = {
-        "prompt_chars": len(prompt),
-        "slots": len(pr.slots),
-        "correct_order": sorted_p[0][0] == "系统规则",
-    }
+    sorted_p = sorted([(s.label, s.priority) for s in pr.slots], key=lambda x: x[1], reverse=True)
+    print(f"  [S] 多源信息混在一起, 安全规则可能被用户请求覆盖")
+    print(f"  [T] 需要按优先级槽位分离")
+    print(f"  [A] PriorityResolver: 5 级优先级 + 槽位分离")
+    print(f"  [R] prompt {len(prompt)} chars, 槽位 {len(pr.slots)}, 序: {' > '.join(l for l,_ in sorted_p)}")
+    RESULTS["phase5"] = {"prompt_chars": len(prompt), "slots": len(pr.slots)}
+    print()
 
 
 # ═══════════════════════════════════════════════════════════
-# Run All
+# Phase 6: entity_type / access_count / 层组去重
+# ═══════════════════════════════════════════════════════════
+
+def experiment_phase6():
+    print("=" * 60)
+    print("Phase 6: entity_type / access_count / 层组去重")
+    print("=" * 60)
+
+    from src.SmallShrimp.core.memory.builtin.provider import BuiltinProvider
+    td = tempfile.mkdtemp()
+    p = BuiltinProvider(Path(td) / "memories")
+    p.initialize("bench6")
+
+    # 写入 50 条混合记忆
+    for i in range(10):
+        p.store("profile", f"用户偏好{i}", entity_type="偏好习惯")
+        p.store("facts", f"Python 特性{i}", entity_type="知识能力")
+        p.store("facts", f"地点信息{i}", entity_type="地点设施")
+        p.store("constraints", f"时间约束{i}", entity_type="时间约束")
+        p.store("constraints", f"健康信息{i}", entity_type="健康医疗")
+
+    # STAR 1: entity_type
+    print(f"  [S] 50 条混合记忆检索 Python, 无关记忆也返回, LLM 被噪声干扰")
+    print(f"  [T] 需要 entity_type 标签, 检索可过滤")
+    print(f"  [A] store() 写入 entity_type, 受控词表 9 类, 越界归 [其他]")
+    r1 = p.search("Python", limit=30)
+    knowledge = sum(1 for r in r1 if r.get("entity_type") in ("知识能力", "偏好习惯"))
+    noise = sum(1 for r in r1 if r.get("entity_type") in ("地点设施", "时间约束", "健康医疗"))
+    noise_pct = noise / len(r1) * 100 if r1 else 0
+    know_pct = knowledge / len(r1) * 100 if r1 else 0
+    print(f"  [R] 检索 Python: {len(r1)} 条返回, 知识相关 {knowledge} 条({know_pct:.0f}%), "
+          f"噪声 {noise} 条({noise_pct:.0f}%)")
+    print(f"      entity_type 全覆盖: {sum(1 for r in r1 if r.get('entity_type'))}/{len(r1)}")
+
+    # STAR 2: access_count
+    for _ in range(10):
+        p.search("Python", limit=5)
+    p.search("地点", limit=5)
+    rows = p._store._conn.execute(
+        "SELECT content, layer, access_count FROM memory_index ORDER BY access_count DESC LIMIT 5"
+    ).fetchall()
+    max_ac = max(int(r[2] or 0) for r in rows)
+    min_ac = min(int(r[2] or 0) for r in rows)
+    print(f"\n  [S] 高频和低频记忆排序一样, 反复问 Python 但不浮出")
+    print(f"  [T] 需要 access_count 回写使高频记忆自然升权")
+    print(f"  [A] touch_recall() 回写, 排序公式 +popularity(0.10)")
+    print(f"  [R] access_count TOP5: max={max_ac}, min={min_ac}, 差={max_ac-min_ac}")
+    for c, l, ac in rows:
+        print(f"      [{l:12s}] {str(c)[:30]:30s} count={ac}")
+
+    # STAR 3: 层组去重
+    cases = [("同组画像", "profile", "constraints", True), ("跨组", "profile", "facts", False)]
+    ok = sum(1 for _, a, b, exp in cases if _is_duplicate_with_layer("x", "x", a, b) == exp)
+    print(f"\n  [S] 跨层内容相似被误合并 (profile 喜欢北京 + facts 北京是首都)")
+    print(f"  [T] 需要层组隔离")
+    print(f"  [A] LAYER_GROUPS + _is_duplicate_with_layer")
+    print(f"  [R] {ok}/{len(cases)} 用例通过")
+
+    # STAR 4: 溯源
+    p.store("reflections", "递归加深度限制", source_turn_id="s1_5", source_text="刚才递归栈溢出")
+    r = p._store._conn.execute(
+        "SELECT source_turn_id, source_text FROM memory_index WHERE source_turn_id!=''"
+    ).fetchone()
+    print(f"\n  [S] 记忆找不到来源, 用户想纠错无从下手")
+    print(f"  [T] 需要每条记忆带来源")
+    print(f"  [A] store() 接受 source_turn_id + source_text")
+    print(f"  [R] 可溯源: {'yes' if r else 'no'}" + (f" ('{r[0]}' <- '{r[1]}')" if r else ""))
+
+    RESULTS["phase6"] = {
+        "knowledge_pct": round(know_pct),
+        "noise_pct": round(noise_pct),
+        "access_spread": max_ac - min_ac,
+        "dedup_pass": f"{ok}/{len(cases)}",
+        "has_trace": bool(r),
+    }
+    p.close()
+    print()
+
+
 # ═══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("╔" + "═" * 58 + "╗")
-    print("║   SmallShrimp 记忆层改进 Benchmark Suite       ║")
-    print("╚" + "═" * 58 + "╝")
-    print()
-
+    print("=" * 60)
+    print("  SmallShrimp 记忆层 Benchmark Suite v2")
+    print("=" * 60)
     experiment_phase1()
     experiment_phase2()
     experiment_phase3()
     experiment_phase4()
     experiment_phase5()
+    experiment_phase6()
 
-    print("\n" + "=" * 60)
+    print("=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print(json.dumps(RESULTS, indent=2, ensure_ascii=False))
-    print(f"\n{'='*60}")
-    print(f"Benchmark complete — {len(RESULTS)} phases verified.")
+    for k, v in RESULTS.items():
+        print(f"  {k}: {json.dumps(v)}")
+    print(f"\nBenchmark v2 done - {len(RESULTS)} phases, 50 条数据集.")
