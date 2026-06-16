@@ -20,6 +20,8 @@ from .common import (
     VALID_MEMORY_LAYERS,
     _normalize_layer,
     _new_memory_id,
+    same_layer_group,
+    normalize_entity_type,
 )
 from .hybrid_search import (
     EmbeddingProvider,
@@ -89,6 +91,10 @@ CREATE TABLE IF NOT EXISTS memory_index (
     bullet      TEXT NOT NULL,
     mtime       INTEGER NOT NULL,
     hash        TEXT NOT NULL,
+    entity_type TEXT NOT NULL DEFAULT '',
+    access_count INTEGER NOT NULL DEFAULT 0,
+    source_turn_id TEXT NOT NULL DEFAULT '',
+    source_text  TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -164,9 +170,11 @@ class MarkdownStore:
             raise ValueError("memory content must be non-empty")
 
         now = datetime.now()
-        # 生成 bullet（带元数据）
         source = kwargs.get("source", "auto")
         importance = kwargs.get("importance", 5)
+        entity_type = normalize_entity_type(kwargs.get("entity_type"))
+        source_turn_id = str(kwargs.get("source_turn_id", ""))
+        source_text = str(kwargs.get("source_text", ""))
         bullet = f"- {content}  `[{source}]`\n"
 
         # 写入 .md 文件（追加）
@@ -179,10 +187,12 @@ class MarkdownStore:
         mtime = int(now.timestamp())
         content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
         cur = self._conn.execute(
-            """INSERT INTO memory_index (file_path, layer, content, bullet, mtime, hash, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO memory_index (file_path, layer, content, bullet, mtime, hash,
+               entity_type, access_count, source_turn_id, source_text, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)""",
             (str(file_path.relative_to(self.memory_dir)), normalized, content, bullet.strip(),
-             mtime, content_hash, now.isoformat(), now.isoformat()),
+             mtime, content_hash, entity_type, source_turn_id, source_text,
+             now.isoformat(), now.isoformat()),
         )
         # 同步 FTS5（jieba 分词）
         seg = _segment(content)
@@ -236,7 +246,7 @@ class MarkdownStore:
 
     def search(self, query: str, layer: str | None = None, limit: int = 10,
                use_hrr: bool = False) -> list[MemoryRecord]:
-        """混合检索: FTS5 + 向量（可选）+ MMR + 时间衰减。"""
+        """混合检索: FTS5 + 向量（可选）+ MMR + 时间衰减 + access_count 热度。"""
         if not query.strip():
             return []
 
@@ -296,6 +306,26 @@ class MarkdownStore:
                 pass  # 无 HRR 则按 FTS5 排序
 
         return results[:limit]
+
+    # ── 命中回写 ──────────────────────────────────────
+
+    def touch_recall(self, record_ids: list[int | str]) -> None:
+        """检索命中后回写 access_count + 1。"""
+        if not record_ids:
+            return
+        now = datetime.now().isoformat()
+        ids = [int(i) if isinstance(i, str) and i.isdigit() else i for i in record_ids]
+        placeholders = ",".join("?" for _ in ids)
+        self._conn.execute(
+            f"""UPDATE memory_index
+                SET access_count = access_count + 1,
+                    updated_at = ?
+                WHERE id IN ({placeholders})""",
+            [now] + ids,
+        )
+        self._conn.commit()
+
+    # ── 列出所有 ──────────────────────────────────────
 
     def list_all(self, layer: str | None = None, limit: int = 50) -> list[MemoryRecord]:
         """列出索引中的所有记录。"""

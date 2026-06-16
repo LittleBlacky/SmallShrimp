@@ -117,10 +117,13 @@ def create_embedding_provider(config: str | None = None) -> EmbeddingProvider | 
 
 # ── 配置 ────────────────────────────────────────────────
 
-FTS_WEIGHT = 0.3          # FTS5 分数权重
-VEC_WEIGHT = 0.5          # 向量分数权重
-TIME_WEIGHT = 0.2         # 时间衰减权重
-TIME_HALF_LIFE_DAYS = 30  # 半衰期（天）
+FTS_WEIGHT = 0.30          # FTS5 分数权重
+VEC_WEIGHT = 0.35          # 向量分数权重
+TIME_WEIGHT = 0.10         # 时间衰减权重
+IMPORTANCE_WEIGHT = 0.10   # 重要度权重
+POPULARITY_WEIGHT = 0.10   # access_count 热度权重
+LAYER_BONUS = 0.05         # constraints/profile 层加成
+TIME_HALF_LIFE_DAYS = 60   # 半衰期（天），衰减变慢
 MMR_LAMBDA = 0.7          # MMR 相关性 vs 多样性
 TOP_K_CANDIDATES = 20     # 候选集大小
 
@@ -252,7 +255,8 @@ def hybrid_search(
         params.append(TOP_K_CANDIDATES)
 
         rows = conn.execute(
-            f"""SELECT mi.id, mi.file_path, mi.layer, mi.content, mi.created_at
+            f"""SELECT mi.id, mi.file_path, mi.layer, mi.content, mi.created_at,
+                       mi.access_count, mi.entity_type
                 FROM memory_fts fts
                 JOIN memory_index mi ON mi.id = fts.rowid
                 WHERE memory_fts MATCH ?
@@ -266,6 +270,7 @@ def hybrid_search(
             all_results[r[0]] = {
                 "id": r[0], "file_path": r[1], "layer": r[2],
                 "content": r[3], "created_at": r[4],
+                "access_count": r[5] or 0, "entity_type": r[6] or "",
                 "fts_score": r.rank if hasattr(r, "rank") else 0,
             }
 
@@ -282,13 +287,14 @@ def hybrid_search(
                 if rowid not in all_results:
                     # 从 memory_index 获取详情
                     info = conn.execute(
-                        "SELECT id, file_path, layer, content, created_at FROM memory_index WHERE id = ?",
+                        "SELECT id, file_path, layer, content, created_at, access_count, entity_type FROM memory_index WHERE id = ?",
                         (rowid,),
                     ).fetchone()
                     if info:
                         all_results[rowid] = {
                             "id": info[0], "file_path": info[1], "layer": info[2],
                             "content": info[3], "created_at": info[4],
+                            "access_count": info[5] or 0, "entity_type": info[6] or "",
                             "fts_score": 0,
                         }
                 if rowid in all_results:
@@ -297,17 +303,27 @@ def hybrid_search(
         except Exception:
             pass  # vec0 可能无数据
 
-    # ── 分数融合 ──
+    # ── 分数融合（向量 + 全文 + 时间衰减 + 热度 + 层加成） ──
     for record in all_results.values():
         fts = record.get("fts_score", 0)
-        # FTS5 rank 是负值（越小越好），转成正分
         fts_norm = 1.0 / (1.0 + abs(fts)) if fts != 0 else 0
         vec = record.get("vec_score", 0)
         time_decay = _time_decay(record.get("created_at", ""))
+
+        # access_count 热度（对数归一化）
+        access = record.get("access_count", 0) or 0
+        popularity = min(1.0, math.log1p(access) / 10.0)
+
+        # 层加成：constraints 和 profile 优先
+        layer = (record.get("layer") or "").lower()
+        layer_bonus = LAYER_BONUS if layer in ("constraints", "profile") else 0
+
         record["final_score"] = (
             fts_norm * FTS_WEIGHT +
             vec * VEC_WEIGHT +
-            time_decay * TIME_WEIGHT
+            time_decay * TIME_WEIGHT +
+            popularity * POPULARITY_WEIGHT +
+            layer_bonus
         )
 
     # ── MMR 重排序 ──

@@ -30,7 +30,11 @@ class MemoryRecord(TypedDict, total=False):
     importance: int
     confidence: float
     recall_count: int
+    access_count: int  # 检索命中次数
     last_recalled_at: str
+    entity_type: str  # 实体类型标签
+    source_turn_id: str  # 来源对话轮次 ID
+    source_text: str  # 来源原文
     created_at: str
     updated_at: str
     archived: bool
@@ -84,11 +88,57 @@ def _normalize_record(record: dict, layer: MemoryLayer, default_importance: int)
         "importance": _clamp_int(int(record.get("importance", default_importance)), 0, 10),
         "confidence": _clamp_float(float(record.get("confidence", 1.0)), 0.0, 1.0),
         "recall_count": int(record.get("recall_count", 0)),
+        "access_count": int(record.get("access_count", 0)),
+        "entity_type": normalize_entity_type(record.get("entity_type")),
+        "source_turn_id": str(record.get("source_turn_id", "")),
+        "source_text": str(record.get("source_text", "")),
         "created_at": str(record.get("created_at", now)),
         "updated_at": str(record.get("updated_at", record.get("created_at", now))),
         "archived": bool(record.get("archived", False)),
         **({"last_recalled_at": str(record["last_recalled_at"])} if record.get("last_recalled_at") else {}),
     }
+
+
+# ── 实体类型词表（参考 Comet ontology） ────────────────
+
+ENTITY_TYPES: dict[str, str] = {
+    "身份信息": "姓名、角色、联系方式",
+    "偏好习惯": "稳定的偏好、习惯、倾向",
+    "知识能力": "技能、知识领域、编程语言",
+    "具体目标": "明确的目标或安排",
+    "健康医疗": "过敏、病史、健康约束",
+    "地点设施": "地理位置、场所",
+    "软件平台": "工具、框架、平台",
+    "时间约束": "日期、截止时间、时间段",
+    "组织项目": "公司、团队、项目",
+}
+
+UNKNOWN_ENTITY_TYPE = "其他"
+
+
+def normalize_entity_type(t: str | None) -> str:
+    """将实体类型规范化到受控词表。越界归为「其他」。"""
+    label = (t or "").strip()
+    return label if label in ENTITY_TYPES else UNKNOWN_ENTITY_TYPE
+
+
+# ── 层组（去重时的层间相容性） ─────────────────────────
+
+LAYER_GROUPS: dict[str, set[str]] = {
+    "profile": {"profile", "constraints"},
+    "knowledge": {"facts", "projects", "reflections"},
+    "session": set(),
+}
+
+
+def same_layer_group(a: str, b: str) -> bool:
+    """判断两层是否属于同一去重组。不同组不合并。"""
+    if a == b:
+        return True
+    for group in LAYER_GROUPS.values():
+        if a in group and b in group:
+            return True
+    return False
 
 
 # ── Query Expansion ─────────────────────────────────────
@@ -178,3 +228,11 @@ def _is_duplicate_memory(left: str, right: str, rank_threshold: float = 7.0) -> 
     if _has_conflicting_number_suffix(left_clean, right_clean):
         return False
     return _rank_memory(left_clean, right_clean) >= rank_threshold and SequenceMatcher(None, left_clean, right_clean).ratio() >= 0.92
+
+
+def _is_duplicate_with_layer(left: str, right: str, left_layer: str, right_layer: str,
+                              rank_threshold: float = 7.0) -> bool:
+    """带层组检查的去重。不同层组不合并。"""
+    if not same_layer_group(left_layer, right_layer):
+        return False
+    return _is_duplicate_memory(left, right, rank_threshold)

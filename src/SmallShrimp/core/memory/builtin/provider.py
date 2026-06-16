@@ -190,11 +190,22 @@ class BuiltinProvider(MemoryProvider):
         use_hrr = kwargs.get("use_hrr", False)
         if layer:
             normalized = _normalize_layer(layer)
-            return self._stores[normalized].search(query, limit=limit)
-        results: list[dict] = []
-        for l in VALID_MEMORY_LAYERS:
-            results.extend(self._stores[l].search(query, limit=limit))
-        results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
+            results = self._stores[normalized].search(query, limit=limit)
+        else:
+            results: list[dict] = []
+            for l in VALID_MEMORY_LAYERS:
+                results.extend(self._stores[l].search(query, limit=limit))
+            results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
+            results = results[:limit]
+
+        # 回写 access_count（仅回写 top-5）
+        top_ids = [r.get("id") for r in results[:5] if r.get("id")]
+        if top_ids:
+            try:
+                self._store.touch_recall(top_ids)
+            except Exception:
+                pass
+
         return results[:limit]
 
     def list_all(self, layer: str | None = None, **kwargs: Any) -> list[dict]:
