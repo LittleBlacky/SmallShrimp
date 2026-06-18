@@ -108,18 +108,24 @@ memory:
         neo4j_uri: bolt://localhost:7687
 ```
 
-### 2.3 检索渐进增强
+### 2.3 检索与 Embedding 渐进增强
 
-向量检索也分多层，用户按需升级：
+检索和 embedding 分层组合，用户按需升级：
 
-| 层级 | 引擎 | 依赖 | 适合场景 |
-|------|------|------|---------|
-| ① FTS5 全文 | SQLite FTS5 + jieba | 无 | 纯关键词，零依赖 |
-| ② 本地向量 | sqlite-vec + sentence-transformers | `pip install smallshrimp[local]` | 本地语义检索，无 API 费 |
-| ③ API 向量 | OpenAI 兼容 API | API key | 云端语义检索，质量最高 |
-| ④ 专用向量库 | Milvus / Qdrant | Docker | 大规模生产 |
+| 层级 | 检索引擎 | Embedding 源 | 依赖 | 场景 |
+|------|---------|-------------|------|------|
+| ① | FTS5 全文 | 无 | 无 | 纯关键词 |
+| ② | FTS5 + sqlite-vec | 本地 sentence-transformers | `pip install smallshrimp[local]` | 本地语义 |
+| ③ | FTS5 + sqlite-vec | OpenAI 兼容 API | API key | 云端语义 |
+| ④ | 专用向量库 | OpenAI 兼容 API | Docker + API key | 大规模生产 |
 
-检索时按可用引擎自动降级：有向量则混合检索，无则纯全文。
+```yaml
+memory:
+  embedding: local             # null | local | api://模型名 | milvus
+```
+
+检索自动降级：有 embedding 则混合检索，无则纯全文。
+`EmbeddingProvider` 已是 ABC，新增后端只需实现 `encode(text) -> list[float]`。
 
 ## 三、记忆类型与存储映射
 
