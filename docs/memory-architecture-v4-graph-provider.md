@@ -28,23 +28,62 @@
 │                        │                                    │
 │                        ▼                                    │
 │              MemoryManager（编排层 + 融合）                   │
-│    store → 写所有 provider                                  │
-│    search → 并行查所有 provider, 结果融合排序                 │
+│    store → 按路由写对应 provider                            │
+│    search → 按路由查对应 provider, 结果融合排序              │
 │    get_prompt_blocks → 收集所有 provider 的 blocks           │
 └──────┬─────────────────────────────────────────────────────┘
        │
-       │  配置: memory.providers = [builtin, graph]  ← 支持多个
+       │  配置: memory.providers = [builtin, graph]
        │
-       ├──────────────────────────┬──────────────────────────┐
-       ▼                          ▼                          ▼
-┌──────────────┐   ┌──────────────────────┐   ┌──────────────────┐
-│ BuiltinProvider│   │   GraphProvider      │   │ 自定义 Provider   │
-│ (SQLite+FTS5) │   │   (Neo4j + 萃取)     │   │ (用户自己写)      │
-│              │   │                      │   │                  │
-│ profile     │   │ entities/relations   │   │ 任意存储         │
-│ constraints │   │ 多跳推理              │   │                  │
-│ 轻量全文搜索 │   │ 实体关系查询          │   │                  │
-└──────────────┘   └──────────────────────┘   └──────────────────┘
+       ├──────────────────────────┬────────────────────────────┐
+       ▼                          ▼                            ▼
+┌──────────────────┐   ┌────────────────────────┐   ┌──────────────────┐
+│ BuiltinProvider   │   │   GraphProvider         │   │ 自定义 Provider   │
+│ (SQLite + FTS5)   │   │   (图记忆, 两层存储)    │   │ (用户自己写)      │
+│                   │   │                        │   │                  │
+│ profile          │   ├── SQLiteGraphBackend    │   │ 任意存储         │
+│ constraints      │   │   (默认, 零依赖)         │   │                  │
+│ facts + 向量      │   │   3 张表存图结构         │   │                  │
+│ sessions         │   │   SQL 递归 CTE 多跳     │   │                  │
+└──────────────────┘   │                        │   └──────────────────┘
+                       ├── Neo4jGraphBackend    │
+                       │   (进阶, 需 Docker)     │
+                       │   原生图遍历 + 向量索引  │
+                       │   Cypher 多跳查询       │
+                       └────────────────────────┘
+```
+
+GraphProvider 本身不绑定存储，通过 Backend 策略实现两层存储切换：
+
+```python
+class GraphProvider(MemoryProvider):
+    def __init__(self, config):
+        backend_type = config.get("backend", "sqlite")  # sqlite | neo4j
+        if backend_type == "neo4j":
+            self._backend = Neo4jGraphBackend(config)
+        else:
+            self._backend = SQLiteGraphBackend(config)
+```
+
+用户配置决定：
+
+```yaml
+# 轻量版（默认，零额外依赖）
+memory:
+  providers:
+    - name: builtin
+    - name: graph
+      graph:
+        backend: sqlite          # 默认
+
+# 进阶版（需要 Docker + Neo4j）
+memory:
+  providers:
+    - name: builtin
+    - name: graph
+      graph:
+        backend: neo4j
+        neo4j_uri: bolt://localhost:7687
 ```
 
 ## 二、记忆类型与存储映射
@@ -379,7 +418,18 @@ class ExtractionPipeline:
 
 ---
 
-## 六、迁移路径
+## 六、图存储 Backend 对比
+
+| 维度 | SQLiteGraphBackend（默认） | Neo4jGraphBackend（进阶） |
+|------|--------------------------|-------------------------|
+| 额外依赖 | 无 | Docker + Neo4j 5 |
+| 安装时间 | 0 | ~5 分钟 |
+| 数据量上限 | ~10 万条 | 千万级以上 |
+| 多跳查询 | SQL 递归 CTE，深度 ≤ 5 | Cypher 原生图遍历 |
+| 向量索引 | 共用 SQLite FTS5 | 原生向量索引 |
+| 适用场景 | 个人使用、小项目 | 生产环境、大规模 |
+
+## 迁移路径
 
 ```
 Phase 1（当前状态）
