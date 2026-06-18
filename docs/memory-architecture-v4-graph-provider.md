@@ -63,12 +63,12 @@ BuiltinProvider 过去以 `.md` 文件为真相源，SQLite 仅做检索索引�
 │ BuiltinProvider   │   │   GraphProvider         │   │ 自定义 Provider   │
 │ (SQLite 唯一存储)  │   │   (图记忆, 两层存储)    │   │ (用户自己写)      │
 │                   │   │                        │   │                  │
-│ profile          │   ├── SQLiteGraphBackend    │   │ 任意存储         │
-│ constraints      │   │   (默认, 零依赖)         │   │                  │
-│ facts + 向量      │   │   3 张表存图结构         │   │                  │
-│ sessions         │   │   SQL 递归 CTE 多跳     │   │                  │
-└──────────────────┘   │                        │   └──────────────────┘
-                       ├── Neo4jGraphBackend    │
+│ 检索分层:          │   ├── SQLiteGraphBackend    │   │ 任意存储         │
+│  ① FTS5(零依赖)   │   │   (默认, 零依赖)         │   │                  │
+│  ② +向量(sqllite) │   │   3 张表存图结构         │   │                  │
+│  ③ +API 向量      │   │   SQL 递归 CTE 多跳     │   │                  │
+│  ④ 专用向量库     │   │                        │   │                  │
+└──────────────────┘   ├── Neo4jGraphBackend    │   └──────────────────┘
                        │   (进阶, 需 Docker)     │
                        │   原生图遍历 + 向量索引  │
                        │   Cypher 多跳查询       │
@@ -108,9 +108,22 @@ memory:
         neo4j_uri: bolt://localhost:7687
 ```
 
+### 2.3 检索渐进增强
+
+向量检索也分多层，用户按需升级：
+
+| 层级 | 引擎 | 依赖 | 适合场景 |
+|------|------|------|---------|
+| ① FTS5 全文 | SQLite FTS5 + jieba | 无 | 纯关键词，零依赖 |
+| ② 本地向量 | sqlite-vec + sentence-transformers | `pip install smallshrimp[local]` | 本地语义检索，无 API 费 |
+| ③ API 向量 | OpenAI 兼容 API | API key | 云端语义检索，质量最高 |
+| ④ 专用向量库 | Milvus / Qdrant | Docker | 大规模生产 |
+
+检索时按可用引擎自动降级：有向量则混合检索，无则纯全文。
+
 ## 三、记忆类型与存储映射
 
-### 2.1 完整性对照表
+### 3.1 完整性对照表
 
 | # | 记忆类型 | 存储引擎 | 原因 | 查询模式 |
 |---|---------|---------|------|---------|
@@ -127,7 +140,7 @@ memory:
 | 11 | `insights` 高层洞察 | **Neo4j** | 关联实体，按主题收敛 | 主题匹配 + 实体回溯 |
 | 12 | `tool_call_history` | **SQLite/Redis** | 临时状态，TTL 淘汰 | key-value |
 
-### 2.2 为什么这样分
+### 3.2 为什么这样分
 
 **SQLite 适合的（1~7）**：数据量小、关系简单、每轮都要读、需要精确匹配。
 
@@ -141,7 +154,7 @@ memory:
 - "用户学过 Python → Python 依赖 Flask → Flask 有漏洞" 这类推理，SQLite 做不到
 - "Python 和 Flask 是什么关系" → Cypher 一条语句，SQLite 要 N 次 JOIN
 
-### 2.3 写入路由
+### 3.3 写入路由
 
 ```python
 _WRITE_ROUTES: dict[str, list[str]] = {
@@ -165,7 +178,7 @@ _WRITE_ROUTES: dict[str, list[str]] = {
 
 不需要存两份。entity 相关数据只写 Neo4j，不写 SQLite，避免数据不一致。
 
-### 2.4 检索路由
+### 3.4 检索路由
 
 ```python
 def _resolve_search_providers(self, query: str, layer: str | None = None) -> list[str]:
@@ -184,6 +197,9 @@ def _resolve_search_providers(self, query: str, layer: str | None = None) -> lis
 
 ## 四、多 Provider MemoryManager
 
+### 4.1 配置
+
+memory:
   providers:                                # 列表，支持多个
     - name: builtin                         # 第一个 = 默认写目标
       type: builtin
@@ -199,7 +215,7 @@ def _resolve_search_providers(self, query: str, layer: str | None = None) -> lis
 
 ```
 
-### 2.2 MemoryManager 多 Provider 编排
+### 4.2 MemoryManager 多 Provider 编排
 
 ```python
 class MemoryManager:
@@ -238,7 +254,7 @@ class MemoryManager:
         return tools
 ```
 
-### 2.3 写入路由 — 按层选择存储
+### 4.3 写入路由 — 按层选择存储
 
 不同种类的记忆适合不同的存储引擎，这是**多语言持久化（Polyglot Persistence）**：
 
@@ -277,7 +293,7 @@ _LAYER_ROUTES: dict[str, list[str]] = {
 }
 ```
 
-### 2.4 检索路由 — 按查询路由到不同存储
+### 4.4 检索路由 — 按查询路由到不同存储
 
 检索时不是所有 provider 都要查，按查询意图路由：
 
@@ -299,7 +315,7 @@ def _route_search(self, query: str) -> list[str]:
     return routes
 ```
 
-### 2.5 Prompt 块融合
+### 4.5 Prompt 块融合
 
 当多个 provider 都注入内容时，按优先级拼接：
 
@@ -317,7 +333,7 @@ def _route_search(self, query: str) -> list[str]:
 
 ## 五、GraphProvider 设计
 
-### 3.1 层声明
+### 5.1 层声明
 
 ```python
 class GraphProvider(MemoryProvider):
@@ -332,7 +348,7 @@ class GraphProvider(MemoryProvider):
     insights = Layer("insights", "高层洞察", searchable="auto", inject="session")
 ```
 
-### 3.2 配置
+### 5.2 配置
 
 ```yaml
 memory:
@@ -362,7 +378,7 @@ memory:
       importance_weight: 0.15
 ```
 
-### 3.3 存储接口
+### 5.3 存储接口
 
 ```python
 class MemoryProvider(ABC):
@@ -407,7 +423,7 @@ class MemoryProvider(ABC):
 
 总共 2 次 LLM 调用。
 
-### 开关控制
+### 6.1 开关控制
 
 ```python
 class ExtractionPipeline:
