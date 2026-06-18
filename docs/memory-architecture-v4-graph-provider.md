@@ -12,11 +12,33 @@
 | **存储可切换** | 一行 config 切换 SQLite / Neo4j / 其他 |
 | **萃取可选** | 小规模用 post-turn 文本提取，大规模用 LLM 三元组萃取 |
 | **检索统一** | 无论底层是 SQLite 还是 Neo4j，上层检索接口一致 |
-| **渐进增强** | 默认零配置跑 SQLite，需要时才开 Neo4j + 萃取 |
+| **零依赖存储** | SQLite 为唯一存储，去掉 .md 文件层，减少双写 I/O |
 
 ---
 
-## 二、架构总览
+## 二、存储层统一
+
+### 2.1 SQLite 为唯一存储
+
+BuiltinProvider 过去以 `.md` 文件为真相源，SQLite 仅做检索索引。实际上读取路径从来不走文件，用户也几乎不打开文件编辑记忆，双写只有开销没有收益。
+
+现在统一为 **SQLite 为唯一存储**，去掉 `.md` 文件层：
+
+```
+改前: 写 .md + 写 SQLite（双写，文件真相源从不被读取）
+改后: 只写 SQLite（单写，WAL 日志保崩溃恢复）
+```
+
+影响：
+
+| 维度 | 改前 | 改后 |
+|------|------|------|
+| 写入 I/O | 文件 + SQLite 双写 | 仅 SQLite 单写 |
+| 真相源 | `.md` 文件 | SQLite + WAL |
+| 记忆可编辑 | 文件手改（几乎不用） | 命令 `/edit` `/forget` |
+| 数据迁移 | 需要同步文件和索引 | 一份 SQLite 完事 |
+
+### 2.2 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -39,7 +61,7 @@
        ▼                          ▼                            ▼
 ┌──────────────────┐   ┌────────────────────────┐   ┌──────────────────┐
 │ BuiltinProvider   │   │   GraphProvider         │   │ 自定义 Provider   │
-│ (SQLite + FTS5)   │   │   (图记忆, 两层存储)    │   │ (用户自己写)      │
+│ (SQLite 唯一存储)  │   │   (图记忆, 两层存储)    │   │ (用户自己写)      │
 │                   │   │                        │   │                  │
 │ profile          │   ├── SQLiteGraphBackend    │   │ 任意存储         │
 │ constraints      │   │   (默认, 零依赖)         │   │                  │
@@ -86,7 +108,7 @@ memory:
         neo4j_uri: bolt://localhost:7687
 ```
 
-## 二、记忆类型与存储映射
+## 三、记忆类型与存储映射
 
 ### 2.1 完整性对照表
 
@@ -160,7 +182,7 @@ def _resolve_search_providers(self, query: str, layer: str | None = None) -> lis
 
 大多数查询走一个 provider 就够了，全查融合是兜底。
 
-## 三、多 Provider MemoryManager
+## 四、多 Provider MemoryManager
 
   providers:                                # 列表，支持多个
     - name: builtin                         # 第一个 = 默认写目标
@@ -293,7 +315,7 @@ def _route_search(self, query: str) -> list[str]:
 
 ---
 
-## 三、GraphProvider 设计
+## 五、GraphProvider 设计
 
 ### 3.1 层声明
 
@@ -359,7 +381,7 @@ class MemoryProvider(ABC):
 
 ---
 
-## 四、萃取管线
+## 六、萃取管线
 
 管线分两步完成，文本输入到结构化三元组输出：
 
@@ -407,7 +429,7 @@ class ExtractionPipeline:
 
 ---
 
-## 五、检索对比
+## 七、检索对比
 
 | 场景 | BuiltinProvider (SQLite) | GraphProvider (Neo4j) |
 |------|------------------------|----------------------|
@@ -418,7 +440,7 @@ class ExtractionPipeline:
 
 ---
 
-## 六、图存储 Backend 对比
+## 八、图存储 Backend 对比
 
 | 维度 | SQLiteGraphBackend（默认） | Neo4jGraphBackend（进阶） |
 |------|--------------------------|-------------------------|
@@ -429,7 +451,7 @@ class ExtractionPipeline:
 | 向量索引 | 共用 SQLite FTS5 | 原生向量索引 |
 | 适用场景 | 个人使用、小项目 | 生产环境、大规模 |
 
-## 迁移路径
+## 九、迁移路径
 
 ```
 Phase 1（当前状态）
@@ -459,7 +481,7 @@ Phase 4（1~2 天）
 
 ---
 
-## 七、不做的
+## 十、不做的
 
 | 功能 | 原因 |
 |------|------|
@@ -471,7 +493,7 @@ Phase 4（1~2 天）
 
 ---
 
-## 八、为什么这样设计
+## 十一、为什么这样设计
 
 关键决策：**萃取和存储分离**。
 
