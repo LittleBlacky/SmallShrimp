@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .context import Context
 from .api import sessions as sessions_api
 from .api import config as config_api
+from .workers.desktop_chat import DesktopChatHandler
+from ..core.events import OutboundEvent
 
 
 def create_app(context: Context) -> FastAPI:
@@ -15,6 +17,10 @@ def create_app(context: Context) -> FastAPI:
         description="WebSocket 服务器，用于实时与 Agent 交互",
         version="0.10.0",
     )
+
+    # 桌面端聊天处理器
+    desktop_handler = DesktopChatHandler(context)
+    context.eventbus.subscribe(OutboundEvent, desktop_handler.on_outbound_event)
 
     # 允许 CORS
     app.add_middleware(
@@ -28,7 +34,17 @@ def create_app(context: Context) -> FastAPI:
     app.include_router(sessions_api.router)
     app.include_router(config_api.router)
 
-    # WebSocket 端点
+    # 桌面端 WebSocket 聊天
+    @app.websocket("/ws/chat")
+    async def desktop_chat(
+        websocket: WebSocket,
+        agent: str = Query(...),
+        session_id: str | None = Query(None),
+    ):
+        """桌面端聊天 WebSocket（支持 agent 选择和会话管理）。"""
+        await desktop_handler.handle_connection(websocket, agent, session_id)
+
+    # 旧版 WebSocket 端点（向后兼容）
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         """WebSocket 端点，用于实时事件流和聊天。"""
