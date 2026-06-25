@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "codegraph": {
+      "type": "command",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"],
+      "description": "Pre-indexed code knowledge graph"
+    }
+  }
+}
