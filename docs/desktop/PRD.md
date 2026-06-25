@@ -41,6 +41,7 @@ SmallShrimp Desktop 是 SmallShrimp AI Agent 框架的桌面客户端，让用�
 | F5 | 技能系统 | P2 | [features/skill-system/PRD.md](features/skill-system/PRD.md) |
 | F6 | 定时任务 | P2 | [features/cron-tasks/PRD.md](features/cron-tasks/PRD.md) |
 | F7 | 桌面壳 | P0 MVP | [features/desktop-shell/PRD.md](features/desktop-shell/PRD.md) |
+| F8 | MCP 工具管理 | P1 | [features/mcp-management/PRD.md](features/mcp-management/PRD.md) |
 
 ### 2.2 MVP 功能一览
 
@@ -52,10 +53,10 @@ P0（必须完成才能发布）:
   F2 Agent 切换  → 下拉选择 Agent
 
 P1（体验完善）:
-  消息操作、工具调用可视化、快捷键、主题、Agent 编辑
+  消息操作、工具调用可视化、快捷键、主题、Agent 编辑、MCP 工具管理
 
 P2（高级功能）:
-  记忆面板、Skill 管理、定时任务、自动更新
+  记忆面板、Skill 管理、定时任务、自动更新、MCP 工具启停
 ```
 
 ---
@@ -168,6 +169,9 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 | `/api/memories` | GET | 记忆列表/搜索 | F4 记忆系统 | P2 |
 | `/api/skills` | GET | Skill 列表 | F5 技能系统 | P2 |
 | `/api/crons` | GET | 定时任务列表 | F6 定时任务 | P2 |
+| `/api/mcp/servers` | GET | MCP Server 列表 + 连接状态 | F8 MCP 工具管理 | P1 |
+| `/api/mcp/servers/:name/tools` | GET | Server 工具列表 | F8 MCP 工具管理 | P1 |
+| `/api/mcp/servers/:name/test` | POST | 连通性测试 | F8 MCP 工具管理 | P1 |
 
 ---
 
@@ -180,8 +184,8 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 | **M2: MVP 配置** | 配置面板 + Agent 切换 | F3 + F2(P0) | 3 天 |
 | **M3: MVP 收尾** | 托盘图标、打包脚本、基础测试 | F7 | 2 天 |
 | **🎯 MVP 发布** | 可下载安装，基础聊天可用 | F1/F2/F3/F7 | **~2 周** |
-| **M4: V1 体验** | 工具调用可视化、快捷键、主题、消息操作、Agent 编辑 | F1 + F2(P1) | 1 周 |
-| **M5: V2 高级** | 记忆面板、Skill 管理、定时任务、自动更新 | F4/F5/F6/F7(P2) | 2 周 |
+| **M4: V1 体验** | 工具调用可视化、快捷键、主题、消息操作、Agent 编辑、MCP 管理 | F1 + F2(P1) + F8 | 1 周 |
+| **M5: V2 高级** | 记忆面板、Skill 管理、定时任务、自动更新、MCP 工具启停 | F4/F5/F6/F7(P2) + F8(P2) | 2 周 |
 
 ---
 
@@ -213,3 +217,4 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 | 2026-06-25 | v0.2 | 技术选型从 Tauri 切换为 Electron |
 | 2026-06-25 | v0.3 | V1 新增 Agent 管理模块 |
 | 2026-06-25 | v0.4 | 重构为两级结构：总 PRD + features/ 子需求 |
+| 2026-06-25 | v0.5 | 新增 F8 MCP 工具管理（P1） |

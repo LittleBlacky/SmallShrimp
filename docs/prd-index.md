@@ -25,6 +25,7 @@
 | F5 | 技能系统 | [features/skill-system/PRD.md](desktop/features/skill-system/PRD.md) | P2 | Agent + API + UI |
 | F6 | 定时任务 | [features/cron-tasks/PRD.md](desktop/features/cron-tasks/PRD.md) | P2 | Agent + API |
 | F7 | 桌面壳 | [features/desktop-shell/PRD.md](desktop/features/desktop-shell/PRD.md) | P0 | Electron |
+| F8 | MCP 工具管理 | [features/mcp-management/PRD.md](desktop/features/mcp-management/PRD.md) | P1 | API + UI |
 
 ---
 
