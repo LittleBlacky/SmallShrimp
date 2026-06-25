@@ -26,6 +26,12 @@ vector = [
     "sqlite-vec>=0.1.0",
     "sentence-transformers>=3.0.0",
 ]
+telegram = [
+    "python-telegram-bot>=21.0,<22",
+]
+discord = [
+    "discord.py>=2.3.0,<3",
+]
 benchmark = [
     "numpy>=1.24.0",
 ]
