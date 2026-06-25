@@ -34,3 +34,4 @@
 - 完成 PRD v0.1 草案
 - 技术选型确定：Electron + React + TypeScript
 - PRD v0.2：从 Tauri 切换为 Electron
+- PRD v0.3：V1 新增 Agent 管理模块（新建/编辑/删除 AGENT.md）

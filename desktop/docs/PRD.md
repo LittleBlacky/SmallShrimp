@@ -59,6 +59,7 @@ SmallShrimp Desktop 是 SmallShrimp AI Agent 框架的桌面客户端，让用�
 | **消息操作** | 复制、重新生成、编辑上一条消息 |
 | **主题切换** | 亮色/暗色/跟随系统 |
 | **字体设置** | 字号、字体族可调 |
+| **Agent 管理** | 新建/编辑/删除 Agent，表单编辑 AGENT.md |
 
 ### 2.3 V2（高级功能）
 
@@ -235,6 +236,35 @@ mcp_servers       → 动态列表（添加/删除/编辑）
 - 会话自动命名（取第一条消息前 30 字）
 - 搜索会话（搜索消息内容）
 
+### 5.5 Agent 管理（V1）
+
+将 `AGENT.md`（YAML 头部 + Markdown 正文）映射为表单：
+
+```yaml
+# AGENT.md 结构 → 表单控件
+---
+name: Pickle              → 文本输入
+llm:
+  provider: deepseek      → 下拉选择（从配置中的 providers 读取）
+  model: deepseek-chat    → 文本输入（含常用模型快捷选项）
+  temperature: 0.7        → 滑块 (0~2, 步长 0.1)
+  context_window: 200000  → 数字输入
+tools:                    → 多选复选框（read/write/shell/websearch/subagent...）
+---
+# 系统提示词正文          → Markdown 编辑器（带预览）
+```
+
+**操作流程：**
+
+| 操作 | 行为 |
+|------|------|
+| 新建 | 填写表单 → 生成 `workspace/agents/<name>/AGENT.md`，自动创建目录 |
+| 编辑 | 解析已有 AGENT.md → 回填表单 → 修改后写回（保留手动编辑的正文格式） |
+| 删除 | 确认对话框 → 删除 `agents/<name>/` 整个目录 |
+| 查看 | 只读预览模式，展示 Agent 元数据 + 渲染后的提示词 |
+
+**入口：** 侧边栏「📦 Agent」→ 列表页（含搜索）→ 点击进入详情/编辑
+
 ---
 
 ## 6. API 设计（Server 端新增/已有）
@@ -302,3 +332,4 @@ mcp_servers       → 动态列表（添加/删除/编辑）
 |------|------|------|
 | 2026-06-25 | v0.1 | 初始草案 |
 | 2026-06-25 | v0.2 | 技术选型从 Tauri 切换为 Electron |
+| 2026-06-25 | v0.3 | V1 新增 Agent 管理模块（新建/编辑/删除） |
