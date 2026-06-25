@@ -2,10 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-size: 14px;
-  --font-family: system-ui, -apple-system, sans-serif;
-  --font-family-mono: "JetBrains Mono", "Cascadia Code", monospace;
+@layer base {
+  :root {
+    --font-size: 14px;
+    --font-family: system-ui, -apple-system, sans-serif;
+    --font-family-mono: "JetBrains Mono", "Cascadia Code", monospace;
+    --foreground: 0 0% 10%;
+    --muted-foreground: 0 0% 45%;
+    --background: 0 0% 100%;
+    --muted: 0 0% 96%;
+  }
+
+  .dark {
+    --foreground: 0 0% 93%;
+    --muted-foreground: 0 0% 65%;
+    --background: 0 0% 10%;
+    --muted: 0 0% 15%;
+  }
+}
+
+@layer utilities {
+  .text-muted-foreground {
+    color: hsl(var(--muted-foreground));
+  }
+  .bg-muted {
+    background-color: hsl(var(--muted));
+  }
+  .bg-background {
+    background-color: hsl(var(--background));
+  }
+  .text-foreground {
+    color: hsl(var(--foreground));
+  }
 }
 
 body {
@@ -13,6 +41,8 @@ body {
   font-family: var(--font-family);
   margin: 0;
   -webkit-font-smoothing: antialiased;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
 }
 
 /* 暗色主题 */
@@ -38,4 +68,5 @@ body {
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.3);
   border-radius: 3px;
+}
 }
