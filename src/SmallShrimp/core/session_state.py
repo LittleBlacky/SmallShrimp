@@ -42,6 +42,7 @@ class SessionState:
     max_session_memory_bytes: int = 60 * 1024
     session_tool_result_bytes: int = 0
     max_session_tool_result_bytes: int = 256 * 1024
+    delivery_target: str = ""  # 主动投递目标平台（cron/无来源会话使用）
 
     def filter_new_memories(self, records: list[dict]) -> list[dict]:
         """按本会话记忆预算筛选尚未展示过的记忆。"""

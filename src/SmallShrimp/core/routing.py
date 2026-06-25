@@ -92,7 +92,7 @@ class RoutingTable:
             prompt_builder=self.context.prompt_builder,
             memory_manager=self.context.memory_manager,
         )
-        session = agent.new_session(source)
+        session = agent.new_session(source=source)
         # 在 history 中记录 agent_id，供 AgentWorker 恢复时使用
         self.context.history_manager.create_session(
             session.session_id, source_str, agent_id=agent_id

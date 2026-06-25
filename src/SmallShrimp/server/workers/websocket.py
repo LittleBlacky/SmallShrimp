@@ -51,7 +51,7 @@ class WebSocketWorker(SubscriberWorker):
 
     async def _run_client_loop(self, ws: WebSocket) -> None:
         """运行客户端消息接收循环。"""
-        from ..core.events import WebSocketEventSource
+        from ...core.events import WebSocketEventSource
 
         while True:
             try:

@@ -206,10 +206,14 @@ class Config:
             with open(self._runtime_file) as f:
                 runtime_data = yaml.safe_load(f) or {}
 
+        # 确保值是可安全 YAML 序列化的（dataclass → dict）
+        if hasattr(value, '__dataclass_fields__'):
+            value = {k: getattr(value, k) for k in value.__dataclass_fields__}
+
         self._set_nested(runtime_data, key, value)
 
         with open(self._runtime_file, "w") as f:
-            yaml.dump(runtime_data, f)
+            yaml.dump(runtime_data, f, default_flow_style=False)
 
     @property
     def workspace(self) -> Path:

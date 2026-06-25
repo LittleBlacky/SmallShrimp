@@ -89,8 +89,11 @@ class HistoryManager:
             data["updated_at"] = datetime.now().isoformat()
             file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
-    def create_session(self, session_id: str, source: str, agent_id: str = "") -> None:
-        """创建新会话（如果不存在）。"""
+    def create_session(self, session_id: str, source, agent_id: str = "") -> None:
+        """创建新会话（如果不存在）。source 接受 str 或 EventSource。"""
+        # 确保 source 是字符串（兼容 EventSource 对象）
+        if not isinstance(source, str):
+            source = str(source)
         file_path = self.sessions_dir / f"{session_id}.json"
         if not file_path.exists():
             data = {
@@ -100,7 +103,9 @@ class HistoryManager:
                 "agent_id": agent_id,
                 "updated_at": datetime.now().isoformat(),
             }
-            file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+            import json as _json
+            _data = _json.dumps(data, ensure_ascii=False, indent=2)
+            file_path.write_text(_data, encoding="utf-8")
 
     def get_session_info(self, session_id: str) -> dict | None:
         """获取会话元信息，不加载完整历史。"""

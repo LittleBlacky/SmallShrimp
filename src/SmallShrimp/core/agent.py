@@ -117,7 +117,6 @@ class Agent:
             session_id=session_id,
             agent=self,
             messages=messages,
-            shared_context=getattr(self, 'shared_context', None),
         )
         return AgentSession(agent=self, state=state)
 

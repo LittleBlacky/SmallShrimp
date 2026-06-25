@@ -160,8 +160,13 @@ class InboundEvent(Event):
 
 @dataclass
 class OutboundEvent(Event):
-    """Event for agent responses to deliver to platforms."""
+    """Event for agent responses to deliver to platforms.
+
+    If ``delivery_target`` is set, DeliveryWorker will route to that
+    specific platform instead of replying to the event's source.
+    """
     error: str | None = None
+    delivery_target: "Any | None" = None  # DeliveryTarget | None — forward ref to avoid circular
 
 
 @dataclass
