@@ -7,8 +7,16 @@
 
 ## 1. 项目结构
 
+前端代码全部收敛在仓库根目录下的 `desktop-app/`，不污染 Python 源码区。
+
 ```
-smallshrimp-desktop/
+# 仓库根: g:\agent\SmallShrimp\
+# ├── src/SmallShrimp/    # Python 后端（已有，不动）
+# ├── docs/               # 文档（已有）
+# ├── workspace/          # 运行时数据（已有）
+# └── desktop-app/        # Electron 前端（新建）
+
+desktop-app/
 ├── package.json
 ├── electron-builder.yml          # electron-builder 打包配置
 ├── vite.config.ts                # Vite (Renderer 构建)

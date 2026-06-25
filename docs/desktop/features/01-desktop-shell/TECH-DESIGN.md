@@ -9,6 +9,8 @@
 
 ### 1.1 文件职责
 
+> 路径相对于仓库根目录 `g:\agent\SmallShrimp\desktop-app\`
+
 ```
 src/main/
 ├── index.ts          # 入口：app.whenReady → 创建窗口、注册 IPC、初始化托盘
@@ -384,9 +386,10 @@ linux:
 
 ---
 
-## 8. 文件清单
+## 8. 文件清单（`desktop-app/` 下新建）
 
-| 文件 | 新建/修改 | 说明 |
+| 文件 | 说明 |
+|------|------|
 |------|----------|------|
 | `src/main/index.ts` | 新建 | 入口 |
 | `src/main/python.ts` | 新建 | 进程管理 |

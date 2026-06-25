@@ -67,6 +67,7 @@ workspace/sessions/
 ```
 
 **读写策略：**
+
 - `.meta.json`：启动加载到内存，写操作先落盘再更新内存
 - `.jsonl`：追加写（O(1)），读取时按 `?offset=N&limit=M` 分页从文件尾倒序读
 - 并发安全：单进程 Server，无需锁
