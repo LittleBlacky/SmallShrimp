@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
-import type { ServerState } from "@shared/types";
-import { ChatWebSocket } from "./services/ws";
-import { useChatStore } from "./stores/chatStore";
-import { useServerStore } from "./stores/serverStore";
-import { ChatView } from "./components/chat/ChatView";
+import {useState, useEffect, useRef} from "react";
+import type {ServerState} from "@shared/types";
+import {ChatWebSocket} from "./services/ws";
+import {useChatStore} from "./stores/chatStore";
+import {useServerStore} from "./stores/serverStore";
+import {ChatView} from "./components/chat/ChatView";
 
 function App() {
   const serverStatus = useServerStore((s) => s.status);
@@ -22,6 +22,10 @@ function App() {
 
   // 监听 Main Process 推送的状态
   useEffect(() => {
+    if (!window.electronAPI) {
+      console.warn("electronAPI 不可用（浏览器开发模式）");
+      return;
+    }
     window.electronAPI.onServerStatusChange((state) => {
       setStatus(state.status, state.port);
     });
@@ -42,11 +46,15 @@ function App() {
   }, [serverStatus, serverPort, currentAgent, handleWsEvent]);
 
   const handleStart = async () => {
+    if (!window.electronAPI) {
+      setError("electronAPI 不可用（请在 Electron 中运行）");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       setStatus("starting");
-      const { port } = await window.electronAPI.startServer();
+      const {port} = await window.electronAPI.startServer();
       setStatus("running", port);
     } catch (err: any) {
       setError(err.message || "启动失败");
@@ -58,7 +66,9 @@ function App() {
 
   const handleStop = async () => {
     wsRef.current?.disconnect();
-    await window.electronAPI.stopServer();
+    if (window.electronAPI) {
+      await window.electronAPI.stopServer();
+    }
     setStatus("stopped");
   };
 
@@ -96,13 +106,16 @@ function App() {
 
         <div className="flex gap-3">
           {serverStatus === "stopped" || serverStatus === "error" ? (
-            <button onClick={handleStart} disabled={loading}
+            <button
+              onClick={handleStart}
+              disabled={loading}
               className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
             >
               {loading ? "启动中..." : "启动服务"}
             </button>
           ) : (
-            <button onClick={handleStop}
+            <button
+              onClick={handleStop}
               className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
             >
               停止服务
@@ -137,7 +150,8 @@ function App() {
           >
             <option value="pickle">pickle</option>
           </select>
-          <button onClick={handleStop}
+          <button
+            onClick={handleStop}
             className="text-xs text-red-600 hover:text-red-800"
           >
             停止
