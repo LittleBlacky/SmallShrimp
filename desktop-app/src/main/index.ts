@@ -32,7 +32,7 @@ function createWindow() {
 
   // 关闭窗口 → 最小化到托盘
   mainWindow.on("close", (event) => {
-    const isQuitting = (global as any).__isQuitting
+    const isQuitting = (global as any).__isQuitting;
     if (!isQuitting) {
       event.preventDefault();
       mainWindow?.hide();
