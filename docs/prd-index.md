@@ -16,16 +16,16 @@
 
 ## 桌面端子需求清单
 
-| 编号 | 子需求 | PRD | 优先级 | 涉及层 |
-|------|--------|-----|--------|--------|
-| F1 | Agent 聊天 | [features/agent-chat/PRD.md](desktop/features/agent-chat/PRD.md) | P0 | Agent + API + UI |
-| F2 | Agent 管理 | [features/agent-management/PRD.md](desktop/features/agent-management/PRD.md) | P0/P1 | Agent + UI |
-| F3 | 配置管理 | [features/configuration/PRD.md](desktop/features/configuration/PRD.md) | P0 | Agent + API + UI |
-| F4 | 记忆系统 | [features/memory-system/PRD.md](desktop/features/memory-system/PRD.md) | P2 | Agent + API + UI |
-| F5 | 技能系统 | [features/skill-system/PRD.md](desktop/features/skill-system/PRD.md) | P2 | Agent + API + UI |
-| F6 | 定时任务 | [features/cron-tasks/PRD.md](desktop/features/cron-tasks/PRD.md) | P2 | Agent + API |
-| F7 | 桌面壳 | [features/desktop-shell/PRD.md](desktop/features/desktop-shell/PRD.md) | P0 | Electron |
-| F8 | MCP 工具管理 | [features/mcp-management/PRD.md](desktop/features/mcp-management/PRD.md) | P1 | API + UI |
+| 迭代 | 编号 | 子需求 | PRD | 优先级 | 涉及层 |
+|------|------|--------|-----|--------|--------|
+| 01 | F7 | 桌面壳 | [features/01-desktop-shell/PRD.md](desktop/features/01-desktop-shell/PRD.md) | P0 | Electron |
+| 02 | F1 | Agent 聊天 | [features/02-agent-chat/PRD.md](desktop/features/02-agent-chat/PRD.md) | P0 | Agent + API + UI |
+| 03 | F3 | 配置管理 | [features/03-configuration/PRD.md](desktop/features/03-configuration/PRD.md) | P0 | Agent + API + UI |
+| 04 | F2 | Agent 管理 | [features/04-agent-management/PRD.md](desktop/features/04-agent-management/PRD.md) | P0/P1 | Agent + UI |
+| 05 | F8 | MCP 工具管理 | [features/05-mcp-management/PRD.md](desktop/features/05-mcp-management/PRD.md) | P1 | API + UI |
+| 06 | F4 | 记忆系统 | [features/06-memory-system/PRD.md](desktop/features/06-memory-system/PRD.md) | P2 | Agent + API + UI |
+| 07 | F5 | 技能系统 | [features/07-skill-system/PRD.md](desktop/features/07-skill-system/PRD.md) | P2 | Agent + API + UI |
+| 08 | F6 | 定时任务 | [features/08-cron-tasks/PRD.md](desktop/features/08-cron-tasks/PRD.md) | P2 | Agent + API |
 
 ---
 

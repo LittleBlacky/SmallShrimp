@@ -159,6 +159,7 @@ Agent Worker
 | 压缩策略 | `context_guard.py` | 4 级主动压缩（摘要/截断/遗忘/重置） |
 
 **会话隔离：**
+
 - 每个会话独立的消息历史文件：`workspace/sessions/<session_id>.jsonl`
 - 跨会话切换时，Server 端切换对应的 conversation_buffer
 - 会话元数据：`workspace/sessions/.meta.json`（ID、标题、创建时间、最后活跃时间、Agent）

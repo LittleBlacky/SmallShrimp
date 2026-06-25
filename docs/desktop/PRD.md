@@ -34,29 +34,29 @@ SmallShrimp Desktop 是 SmallShrimp AI Agent 框架的桌面客户端，让用�
 
 | 编号 | 子需求 | 优先级 | 文档 |
 |------|--------|--------|------|
-| F1 | Agent 聊天 | P0 MVP | [features/agent-chat/PRD.md](features/agent-chat/PRD.md) |
-| F2 | Agent 管理 | P0(切换) P1(编辑) | [features/agent-management/PRD.md](features/agent-management/PRD.md) |
-| F3 | 配置管理 | P0 MVP | [features/configuration/PRD.md](features/configuration/PRD.md) |
-| F4 | 记忆系统 | P2 | [features/memory-system/PRD.md](features/memory-system/PRD.md) |
-| F5 | 技能系统 | P2 | [features/skill-system/PRD.md](features/skill-system/PRD.md) |
-| F6 | 定时任务 | P2 | [features/cron-tasks/PRD.md](features/cron-tasks/PRD.md) |
-| F7 | 桌面壳 | P0 MVP | [features/desktop-shell/PRD.md](features/desktop-shell/PRD.md) |
-| F8 | MCP 工具管理 | P1 | [features/mcp-management/PRD.md](features/mcp-management/PRD.md) |
+| F7 | 桌面壳 | P0 MVP | [features/01-desktop-shell/PRD.md](features/01-desktop-shell/PRD.md) |
+| F1 | Agent 聊天 | P0 MVP | [features/02-agent-chat/PRD.md](features/02-agent-chat/PRD.md) |
+| F3 | 配置管理 | P0 MVP | [features/03-configuration/PRD.md](features/03-configuration/PRD.md) |
+| F2 | Agent 管理 | P0(切换) P1(编辑) | [features/04-agent-management/PRD.md](features/04-agent-management/PRD.md) |
+| F8 | MCP 工具管理 | P1 | [features/05-mcp-management/PRD.md](features/05-mcp-management/PRD.md) |
+| F4 | 记忆系统 | P2 | [features/06-memory-system/PRD.md](features/06-memory-system/PRD.md) |
+| F5 | 技能系统 | P2 | [features/07-skill-system/PRD.md](features/07-skill-system/PRD.md) |
+| F6 | 定时任务 | P2 | [features/08-cron-tasks/PRD.md](features/08-cron-tasks/PRD.md) |
 
 ### 2.2 MVP 功能一览
 
 ```
 P0（必须完成才能发布）:
-  F7 桌面壳      → 进程管理 + 托盘 + 窗口
-  F1 Agent 聊天  → 聊天界面 + 流式输出 + 会话列表
-  F3 配置管理    → 配置表单 + Provider/API Key
-  F2 Agent 切换  → 下拉选择 Agent
+  01 桌面壳      → 进程管理 + 托盘 + 窗口
+  02 Agent 聊天  → 聊天界面 + 流式输出 + 会话列表
+  03 配置管理    → 配置表单 + Provider/API Key
+  04 Agent 切换  → 下拉选择 Agent
 
 P1（体验完善）:
-  消息操作、工具调用可视化、快捷键、主题、Agent 编辑、MCP 工具管理
+  05 MCP 工具管理、消息操作、工具调用可视化、快捷键、主题、Agent 编辑
 
 P2（高级功能）:
-  记忆面板、Skill 管理、定时任务、自动更新、MCP 工具启停
+  06 记忆面板、07 Skill 管理、08 定时任务、自动更新、MCP 工具启停
 ```
 
 ---
@@ -161,17 +161,17 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 
 | 端点 | 方法 | 用途 | 所属子需求 | 优先级 |
 |------|------|------|-----------|--------|
-| `/api/sessions` | GET | 会话列表 | F1 Agent 聊天 | P0 |
-| `/api/sessions/:id` | GET | 会话消息历史 | F1 Agent 聊天 | P0 |
-| `/api/sessions/:id` | DELETE | 删除会话 | F1 Agent 聊天 | P0 |
-| `/api/sessions/:id/rename` | PATCH | 重命名会话 | F1 Agent 聊天 | P1 |
-| `/api/config` | GET/PUT | 读写配置 | F3 配置管理 | P0 |
-| `/api/memories` | GET | 记忆列表/搜索 | F4 记忆系统 | P2 |
-| `/api/skills` | GET | Skill 列表 | F5 技能系统 | P2 |
-| `/api/crons` | GET | 定时任务列表 | F6 定时任务 | P2 |
-| `/api/mcp/servers` | GET | MCP Server 列表 + 连接状态 | F8 MCP 工具管理 | P1 |
-| `/api/mcp/servers/:name/tools` | GET | Server 工具列表 | F8 MCP 工具管理 | P1 |
-| `/api/mcp/servers/:name/test` | POST | 连通性测试 | F8 MCP 工具管理 | P1 |
+| `/api/sessions` | GET | 会话列表 | F1 Agent 聊天 (02) | P0 |
+| `/api/sessions/:id` | GET | 会话消息历史 | F1 Agent 聊天 (02) | P0 |
+| `/api/sessions/:id` | DELETE | 删除会话 | F1 Agent 聊天 (02) | P0 |
+| `/api/sessions/:id/rename` | PATCH | 重命名会话 | F1 Agent 聊天 (02) | P1 |
+| `/api/config` | GET/PUT | 读写配置 | F3 配置管理 (03) | P0 |
+| `/api/mcp/servers` | GET | MCP Server 列表 + 连接状态 | F8 MCP 工具管理 (05) | P1 |
+| `/api/mcp/servers/:name/tools` | GET | Server 工具列表 | F8 MCP 工具管理 (05) | P1 |
+| `/api/mcp/servers/:name/test` | POST | 连通性测试 | F8 MCP 工具管理 (05) | P1 |
+| `/api/memories` | GET | 记忆列表/搜索 | F4 记忆系统 (06) | P2 |
+| `/api/skills` | GET | Skill 列表 | F5 技能系统 (07) | P2 |
+| `/api/crons` | GET | 定时任务列表 | F6 定时任务 (08) | P2 |
 
 ---
 
@@ -179,13 +179,13 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 
 | 阶段 | 内容 | 涉及子需求 | 预估工期 |
 |------|------|-----------|----------|
-| **M0: 基础设施** | Electron 项目搭建 + React 框架 + 开发环境 | F7 | 2 天 |
-| **M1: MVP 核心** | 进程管理 + 聊天 + 流式输出 + 会话列表 | F7 + F1 | 1 周 |
-| **M2: MVP 配置** | 配置面板 + Agent 切换 | F3 + F2(P0) | 3 天 |
-| **M3: MVP 收尾** | 托盘图标、打包脚本、基础测试 | F7 | 2 天 |
-| **🎯 MVP 发布** | 可下载安装，基础聊天可用 | F1/F2/F3/F7 | **~2 周** |
-| **M4: V1 体验** | 工具调用可视化、快捷键、主题、消息操作、Agent 编辑、MCP 管理 | F1 + F2(P1) + F8 | 1 周 |
-| **M5: V2 高级** | 记忆面板、Skill 管理、定时任务、自动更新、MCP 工具启停 | F4/F5/F6/F7(P2) + F8(P2) | 2 周 |
+| **M0: 基础设施** | Electron 项目搭建 + React 框架 + 开发环境 | 01 桌面壳 | 2 天 |
+| **M1: MVP 核心** | 进程管理 + 聊天 + 流式输出 + 会话列表 | 01 + 02 | 1 周 |
+| **M2: MVP 配置** | 配置面板 + Agent 切换 | 03 + 04(P0) | 3 天 |
+| **M3: MVP 收尾** | 托盘图标、打包脚本、基础测试 | 01 | 2 天 |
+| **🎯 MVP 发布** | 可下载安装，基础聊天可用 | 01/02/03/04 | **~2 周** |
+| **M4: V1 体验** | 工具调用可视化、快捷键、主题、消息操作、Agent 编辑、MCP 管理 | 02 + 04(P1) + 05 | 1 周 |
+| **M5: V2 高级** | 记忆面板、Skill 管理、定时任务、自动更新、MCP 工具启停 | 06/07/08 + 01(P2) | 2 周 |
 
 ---
 
@@ -218,3 +218,4 @@ Renderer (React)              Main Process (Node)          SmallShrimp (Python)
 | 2026-06-25 | v0.3 | V1 新增 Agent 管理模块 |
 | 2026-06-25 | v0.4 | 重构为两级结构：总 PRD + features/ 子需求 |
 | 2026-06-25 | v0.5 | 新增 F8 MCP 工具管理（P1） |
+| 2026-06-25 | v0.6 | features 按迭代顺序重命名 01~08 |
