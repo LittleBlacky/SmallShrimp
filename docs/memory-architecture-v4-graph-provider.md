@@ -140,9 +140,259 @@ memory:
 
 `/rebuild-index` 遍历 `memory_index` 全部记录，重新计算 embedding 写入向量表。**不跑不影响已有功能**——FTS5 关键词搜索一直在，旧数据始终能被搜到。
 
-## 三、记忆类型与存储映射
+---
 
-### 3.1 完整性对照表
+## 三、置信度管线 — 写入把关
+
+### 3.1 问题：写入入口没有统一标准
+
+当前有四条写入路径，各自为政：
+
+| 写入路径 | 触发者 | 有无过滤 | 置信度 |
+|---------|--------|---------|-------|
+| `remember_*` 工具 | LLM 自己决定调不调 | ❌ LLM 说啥就写啥 | 未知 |
+| `failure_learner` | 工具执行失败计数 | ✅ 阈值过滤 | 高 |
+| `sync_turn` → sessions | 每轮自动 | ✅ 只写日志，不进长期记忆 | — |
+| 外部直接调 `store()` | 任意代码 | ❌ 无 | 未知 |
+
+最大的问题是 **LLM 调 `remember_*` 时，它自己判断"这值得记住"，但这个判断没有经过任何校验。** LLM 还经常不记得调这些工具。
+
+### 3.2 方案：置信度管线
+
+核心思路：**在 `MemoryManager.store()` 之前加一层 `ConfidenceGate`，把所有写入请求收口**，用信号强度决定该不该写、写到哪里。
+
+```
+工具层 / Agent 内部调用
+       │
+       ▼
+┌─────────────────────────────────────┐
+│          ConfidenceGate              │
+│                                     │
+│  输入: layer, content, signals      │
+│                                     │
+│  1. 信号识别（SignalDetector）       │
+│     · 用户纠正 → 0.9                │
+│     · 失败模式 → 0.8                │
+│     · 重复信息 → 0.7                │
+│     · 关键词触发 → 0.5              │
+│     · LLM 自觉 → 0.3                │
+│                                     │
+│  2. 置信度裁决（resolve）            │
+│     confidence = max(signals)       │
+│                                     │
+│  3. 路由（route）                    │
+│     ≥ 0.7 → 直接写入 target layer    │
+│     ≥ 0.4 → 暂存 staging 区         │
+│     < 0.4 → 丢弃                    │
+│                                     │
+└─────────────────────────────────────┘
+       │
+       ▼
+   MemoryProvider.store()
+```
+
+### 3.3 组件详解
+
+#### SignalDetector — 信号识别
+
+从输入上下文中提取多个独立的置信度信号。每个信号有明确的触发条件，不依赖 LLM 判断。
+
+```python
+class SignalDetector:
+    """从 store() 的输入上下文提取多个置信度信号。"""
+
+    # 确定性信号（高置信度）
+    def detect_correction(user_msg: str, assistant_msg: str) -> float:
+        """用户纠正检测。
+        触发条件: 用户在下一轮指出 Agent 的错误
+        关键词: "不对" "不是" "错了" "应该说" "更正"
+        置信度: 0.9
+        """
+
+    def detect_failure(tool_results: list) -> float:
+        """工具执行失败。
+        触发条件: 当前 turn 的工具调用有 error
+        置信度: 0.8
+        现状: FailureLearner 已有此能力，直接复用
+        """
+
+    def detect_repetition(content: str, existing: list) -> float:
+        """用户重复提到同一信息。
+        触发条件: 新 content 与已有记忆相似度 > 0.8
+        置信度: 0.7
+        注意: 非精确去重，而是「同一信息出现多次应提升」
+        """
+
+    # 弱信号（低置信度）
+    def detect_keyword(content: str) -> float:
+        """关键词触发。
+        触发条件: content 包含 "我是" "记住" "我在" "我的" "不要" 等
+        置信度: 0.5
+        """
+
+    def detect_llm_call(content: str) -> float:
+        """LLM 自觉调用 remember_*。
+        触发条件: 来自 LLM 生成的 tool call
+        置信度: 0.3
+        说明: LLM 觉得重要不一定真重要，给它低分去 staging
+        """
+```
+
+#### ConfidenceGate — 裁决与路由
+
+```python
+class ConfidenceGate:
+    THRESHOLD_DIRECT = 0.7    # 直接写入正式层
+    THRESHOLD_STAGING = 0.4   # 暂存待强化
+    THRESHOLD_DISCARD = 0.0   # 丢弃
+
+    def judge(self, layer: str, content: str, signals: dict[str, float]) -> RoutingDecision:
+        """综合所有信号做裁决。"""
+        confidence = max(signals.values()) if signals else 0.0
+
+        if confidence >= self.THRESHOLD_DIRECT:
+            return RoutingDecision(
+                action="write",
+                target_layer=layer,
+                confidence=confidence,
+            )
+        elif confidence >= self.THRESHOLD_STAGING:
+            return RoutingDecision(
+                action="stage",
+                target_layer=layer,
+                confidence=confidence,
+            )
+        else:
+            return RoutingDecision(
+                action="discard",
+                confidence=confidence,
+            )
+```
+
+#### StagingArea — 暂存与提升
+
+暂存起来的记录不直接进长期记忆，而是等**证据累积**到了再提升：
+
+```python
+class StagingArea:
+    """暂存低置信度记忆，累积到阈值后提升到正式层。"""
+
+    def __init__(self, db: sqlite3.Connection):
+        self._conn = db
+        # staging 表: id, content_hash, content, layer, count, first_seen, last_seen
+        self._ensure_table()
+
+    def stage(self, content: str, layer: str, confidence: float, **kwargs) -> str:
+        """暂存一条记录。如果同内容已存在，bump 计数。"""
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        existing = self._find_by_hash(content_hash)
+        if existing:
+            self._bump(existing["id"])
+            return self._promote_if_ready(existing["id"], content_hash, layer)
+        return self._insert(content_hash, content, layer, confidence, **kwargs)
+
+    def _promote_if_ready(self, row_id: int, content_hash: str, layer: str) -> str | None:
+        """同内容出现 2 次 → 提升到正式层。"""
+        row = self._conn.execute(
+            "SELECT count FROM staging WHERE id = ?", (row_id,)
+        ).fetchone()
+        if row and row[0] >= 2:
+            self._move_to_layer(content_hash, layer)
+            self._remove(content_hash)
+            return layer
+        return None
+```
+
+### 3.4 整合位置
+
+```
+agent.py 的 turn_end 流程
+    │
+    ├── failure_learner.observe_turn()
+    │       └── 已有确定性信号 → 带 confidence=0.8 调 ConfidenceGate → 直接写
+    │
+    ├── LLM 生成了 remember_* tool call
+    │       └── 带 confidence=0.3 调 ConfidenceGate → staging（除非有额外信号叠加）
+    │
+    ├── sync_turn()
+    │       └── 只写 sessions 日志，不进入 ConfidenceGate
+    │
+    └── 新: 快速规则扫描（写 staging）
+            └── 扫描 user_msg 关键词模式："我是" "我在" "记住" 等
+                → 暂存到 staging，等第二次出现再提升
+```
+
+MemoryManager 的改动最小：
+
+```python
+class MemoryManager:
+    def __init__(self, provider_or_dir):
+        # 现有初始化 + 新增
+        self._confidence_gate = ConfidenceGate()
+        self._signal_detector = SignalDetector()
+        self._staging = StagingArea()  # 复用同一 SQLite
+
+    def store(self, layer: str, content: str, **kwargs) -> dict:
+        # 新: 走置信度管线
+        signals = self._signal_detector.detect_all(
+            layer=layer, content=content, **kwargs
+        )
+        decision = self._confidence_gate.judge(layer, content, signals)
+
+        if decision.action == "discard":
+            return {"action": "discard", "content": content, "confidence": decision.confidence}
+
+        if decision.action == "stage":
+            self._staging.stage(content, decision.target_layer, decision.confidence, **kwargs)
+            return {"action": "staged", "content": content, "confidence": decision.confidence}
+
+        # write — 直接穿透到 provider
+        return self._provider.store(decision.target_layer, content, **kwargs)
+```
+
+### 3.5 置信度与现有字段的关系
+
+现在 `MemoryRecord` 已有 `confidence` 字段（0.0~1.0），但它的含义不明确，实际上从未被使用。
+
+重新定义：
+
+| 字段 | 含义 | 设置者 |
+|------|------|--------|
+| `importance` | 这条记忆的重要程度（1-10），影响排序权重 | ConfidenceGate 根据信号设置 |
+| `confidence` | 这条记忆的可靠程度（0.0-1.0），影响是否出现在 prompt | 写入时由 ConfidenceGate 设定 |
+| `access_count` | 检索命中次数，热度浮出 | 检索时自动回写 |
+
+置信度 ≤ 0.5 的记录在 prompt 注入时标记为"待确认"：
+
+```
+- 用户好像对花生过敏（待确认，LLM 推测）
+- 用户对花生过敏（已确认，用户明确说明）
+```
+
+### 3.6 不做 LLM 后置提取的原因
+
+文档 2.2 节已阐明：**post-turn 提取依赖 LLM，不稳定且昂贵。**
+
+置信度管线的替代思路：
+
+- **LLM 调 `remember_*` 本身是一个信号**，但给它低置信度，走 staging，等第二次出现才提升
+- **规则扫描比 LLM 提取便宜得多**，关键词 + 正则几毫秒跑完
+- **确定性信号（correction/failure）直接写**，不走 LLM
+- **Evidence accumulation 取代一次性判断**——不需要 LLM 一次判断准不准，只需要 LLM 提取，累积归置信度管
+
+### 3.7 改动范围
+
+| 改动 | 范围 | 复杂度 |
+|------|------|--------|
+| 新增 `SignalDetector` | 新文件 `src/SmallShrimp/core/memory/confidence.py` | 低 |
+| 新增 `ConfidenceGate` | 同上 | 低 |
+| 新增 `StagingArea` | 同上 | 中 |
+| 修改 `MemoryManager.store()` | 插入 ConfidenceGate 调用 | 低 |
+| 修改 `remember_*` 工具 | 传递信号来源信息 | 低 |
+
+## 四、记忆类型与存储映射
+
+### 4.1 完整性对照表
 
 | # | 记忆类型 | 存储引擎 | 原因 | 查询模式 |
 |---|---------|---------|------|---------|
@@ -159,7 +409,7 @@ memory:
 | 11 | `insights` 高层洞察 | **Neo4j** | 关联实体，按主题收敛 | 主题匹配 + 实体回溯 |
 | 12 | `tool_call_history` | **SQLite/Redis** | 临时状态，TTL 淘汰 | key-value |
 
-### 3.2 为什么这样分
+### 4.2 为什么这样分
 
 **SQLite 适合的（1~7）**：数据量小、关系简单、每轮都要读、需要精确匹配。
 
@@ -173,7 +423,7 @@ memory:
 - "用户学过 Python → Python 依赖 Flask → Flask 有漏洞" 这类推理，SQLite 做不到
 - "Python 和 Flask 是什么关系" → Cypher 一条语句，SQLite 要 N 次 JOIN
 
-### 3.3 写入路由
+### 4.3 写入路由
 
 ```python
 _WRITE_ROUTES: dict[str, list[str]] = {
@@ -197,7 +447,7 @@ _WRITE_ROUTES: dict[str, list[str]] = {
 
 不需要存两份。entity 相关数据只写 Neo4j，不写 SQLite，避免数据不一致。
 
-### 3.4 检索路由
+### 4.4 检索路由
 
 ```python
 def _resolve_search_providers(self, query: str, layer: str | None = None) -> list[str]:
@@ -214,9 +464,9 @@ def _resolve_search_providers(self, query: str, layer: str | None = None) -> lis
 
 大多数查询走一个 provider 就够了，全查融合是兜底。
 
-## 四、多 Provider MemoryManager
+## 五、多 Provider MemoryManager
 
-### 4.1 配置
+### 5.1 配置
 
 memory:
   providers:                                # 列表，支持多个
@@ -234,7 +484,7 @@ memory:
 
 ```
 
-### 4.2 MemoryManager 多 Provider 编排
+### 5.2 MemoryManager 多 Provider 编排
 
 ```python
 class MemoryManager:
@@ -273,7 +523,7 @@ class MemoryManager:
         return tools
 ```
 
-### 4.3 写入路由 — 按层选择存储
+### 5.3 写入路由 — 按层选择存储
 
 不同种类的记忆适合不同的存储引擎，这是**多语言持久化（Polyglot Persistence）**：
 
@@ -312,7 +562,7 @@ _LAYER_ROUTES: dict[str, list[str]] = {
 }
 ```
 
-### 4.4 检索路由 — 按查询路由到不同存储
+### 5.4 检索路由 — 按查询路由到不同存储
 
 检索时不是所有 provider 都要查，按查询意图路由：
 
@@ -334,7 +584,7 @@ def _route_search(self, query: str) -> list[str]:
     return routes
 ```
 
-### 4.5 Prompt 块融合
+### 5.5 Prompt 块融合
 
 当多个 provider 都注入内容时，按优先级拼接：
 
@@ -350,9 +600,9 @@ def _route_search(self, query: str) -> list[str]:
 
 ---
 
-## 五、GraphProvider 设计
+## 六、GraphProvider 设计
 
-### 5.1 层声明
+### 6.1 层声明
 
 ```python
 class GraphProvider(MemoryProvider):
@@ -367,7 +617,7 @@ class GraphProvider(MemoryProvider):
     insights = Layer("insights", "高层洞察", searchable="auto", inject="session")
 ```
 
-### 5.2 配置
+### 6.2 配置
 
 ```yaml
 memory:
@@ -397,7 +647,7 @@ memory:
       importance_weight: 0.15
 ```
 
-### 5.3 存储接口
+### 6.3 存储接口
 
 ```python
 class MemoryProvider(ABC):
@@ -416,7 +666,7 @@ class MemoryProvider(ABC):
 
 ---
 
-## 六、萃取管线
+## 七、萃取管线
 
 管线分两步完成，文本输入到结构化三元组输出：
 
@@ -442,7 +692,7 @@ class MemoryProvider(ABC):
 
 总共 2 次 LLM 调用。
 
-### 6.1 开关控制
+### 7.1 开关控制
 
 ```python
 class ExtractionPipeline:
@@ -464,7 +714,7 @@ class ExtractionPipeline:
 
 ---
 
-## 七、检索对比
+## 八、检索对比
 
 | 场景 | BuiltinProvider (SQLite) | GraphProvider (Neo4j) |
 |------|------------------------|----------------------|
@@ -475,7 +725,7 @@ class ExtractionPipeline:
 
 ---
 
-## 八、图存储 Backend 对比
+## 九、图存储 Backend 对比
 
 | 维度 | SQLiteGraphBackend（默认） | Neo4jGraphBackend（进阶） |
 |------|--------------------------|-------------------------|
@@ -486,7 +736,7 @@ class ExtractionPipeline:
 | 向量索引 | 共用 SQLite FTS5 | 原生向量索引 |
 | 适用场景 | 个人使用、小项目 | 生产环境、大规模 |
 
-## 九、迁移路径
+## 十、迁移路径
 
 ```
 Phase 1（当前状态）
@@ -516,7 +766,7 @@ Phase 4（1~2 天）
 
 ---
 
-## 十、不做的
+## 十一、不做的
 
 | 功能 | 原因 |
 |------|------|
@@ -528,7 +778,7 @@ Phase 4（1~2 天）
 
 ---
 
-## 十一、为什么这样设计
+## 十二、为什么这样设计
 
 关键决策：**萃取和存储分离**。
 
