@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...core.events import OutboundEvent
 from .base import SubscriberWorker
@@ -12,6 +12,7 @@ from .base import SubscriberWorker
 if TYPE_CHECKING:
     from ..context import Context
     from ...channels.base import Channel
+    from ...channels.target import DeliveryTarget
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,6 @@ def chunk_message(content: str, limit: int) -> list[str]:
                 chunks.append(current)
 
             if len(para) > limit:
-                # 硬分割
                 for i in range(0, len(para), limit):
                     chunks.append(para[i : i + limit])
                 current = ""
@@ -66,7 +66,13 @@ def chunk_message(content: str, limit: int) -> list[str]:
 
 
 class DeliveryWorker(SubscriberWorker):
-    """将 OutboundEvent 投递到对应平台的 Worker。"""
+    """将 OutboundEvent 投递到对应平台的 Worker。
+
+    投递策略（按优先级）：
+      1. event.delivery_target 指定平台 → 投递到指定平台
+      2. event.source.platform_name 从来源推断 → 回复来源平台（旧行为）
+      3. 以上都不满足 → 跳过投递
+    """
 
     def __init__(self, context: "Context"):
         super().__init__(context)
@@ -81,6 +87,10 @@ class DeliveryWorker(SubscriberWorker):
             if channel.platform_name == platform:
                 return channel
         return None
+
+    def _get_gateway(self) -> "Any | None":
+        """获取 GatewayManager（如果可用）。"""
+        return getattr(self.context, "gateway_manager", None)
 
     async def _deliver_with_retry(
         self, chunks: list[str], source, channel: "Channel"
@@ -104,19 +114,48 @@ class DeliveryWorker(SubscriberWorker):
                     return False
         return False
 
+    async def _deliver_to_target(self, target: "DeliveryTarget", content: str, source) -> bool:
+        """通过 GatewayManager 投递到指定 DeliveryTarget。"""
+        gateway = self._get_gateway()
+        if gateway:
+            return await gateway.send(target, content)
+
+        # 回退：通过 source 找 Channel
+        channel = self._get_channel(target.platform)
+        if not channel:
+            self.logger.warning(f"未找到平台 {target.platform} 的 Channel")
+            return False
+        limit = getattr(channel, "max_message_length", 2**31)
+        chunks = chunk_message(content, limit)
+        return await self._deliver_with_retry(chunks, source, channel)
+
     async def handle_event(self, event: OutboundEvent) -> None:
         """处理 OutboundEvent 投递。"""
         try:
             source = event.source
 
+            # 优先级 1: delivery_target 指定平台
+            if event.delivery_target is not None:
+                success = await self._deliver_to_target(
+                    event.delivery_target, event.content, source
+                )
+                if success:
+                    self.logger.info(
+                        f"已投递消息到 {event.delivery_target.platform}，会话 {event.session_id}"
+                    )
+                else:
+                    self.logger.error(f"投递到 {event.delivery_target.platform} 失败")
+                self.context.eventbus.ack(event)
+                return
+
+            # 优先级 2: 从 event source 推断平台
             if not source.platform_name:
                 self.logger.warning(
-                    f"会话 {event.session_id} 无平台来源，跳过投递"
+                    f"会话 {event.session_id} 无平台来源且无 delivery_target，跳过投递"
                 )
                 self.context.eventbus.ack(event)
                 return
 
-            # 获取对应平台的 Channel
             channel = self._get_channel(source.platform_name)
             if not channel:
                 self.logger.warning(
@@ -125,16 +164,13 @@ class DeliveryWorker(SubscriberWorker):
                 self.context.eventbus.ack(event)
                 return
 
-            # 分割消息（按平台限制）
             limit = getattr(channel, "max_message_length", 2**31)
             chunks = chunk_message(event.content, limit)
 
-            # 投递
             success = await self._deliver_with_retry(chunks, source, channel)
             if not success:
                 self.logger.error(f"丢弃会话 {event.session_id} 的消息")
 
-            # 确认投递
             self.context.eventbus.ack(event)
             self.logger.info(
                 f"已投递消息到 {source.platform_name}，会话 {event.session_id}"
@@ -142,3 +178,7 @@ class DeliveryWorker(SubscriberWorker):
 
         except Exception as e:
             self.logger.error(f"投递消息失败: {e}")
+            try:
+                self.context.eventbus.ack(event)
+            except Exception:
+                pass

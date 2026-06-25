@@ -53,6 +53,8 @@ class CronWorker(Worker):
             )
             cron_source = CronEventSource(cron_id=cron_def.id)
             session = agent.new_session(source=cron_source)
+            if cron_def.delivery_target:
+                session.state.delivery_target = cron_def.delivery_target
 
             event = DispatchEvent(
                 session_id=session.session_id,

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ..tools.registry import ToolRegistry
     from ..utils.config import Config
     from ..channels.base import Channel
+    from ..channels.gateway import GatewayManager
 
 
 @dataclass
@@ -36,6 +37,7 @@ class Context:
     cron_loader: "CronLoader"
     workspace: Path = field(default_factory=lambda: Path("workspace"))
     channels: list["Channel"] = field(default_factory=list)
+    gateway_manager: "GatewayManager | None" = field(default=None)
     routing_table: "RoutingTable | None" = field(default=None)
     websocket_worker: "WebSocketWorker | None" = field(default=None)
 
@@ -52,7 +54,7 @@ class Context:
         from ..core.memory import create_memory_manager
         from ..core.cron_loader import CronLoader
         from ..tools import create_tool_registry
-        from ..channels import create_channels_from_config
+        from ..channels import create_channels_from_config, create_gateway_manager
 
         config = Config.from_yaml(workspace / "config.user.yaml")
         config.workspace = workspace
@@ -76,6 +78,7 @@ class Context:
 
         # 从配置创建 Channel
         channels = create_channels_from_config(config)
+        gateway_manager = create_gateway_manager(channels)
 
         # 先创建 Context 以支持 RoutingTable 的反向引用
         context = cls(
@@ -91,6 +94,7 @@ class Context:
             cron_loader=cron_loader,
             workspace=workspace,
             channels=channels,
+            gateway_manager=gateway_manager,
         )
 
         # RoutingTable 需要 Context 引用

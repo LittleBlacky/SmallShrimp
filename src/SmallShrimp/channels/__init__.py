@@ -5,6 +5,8 @@ from .telegram_channel import TelegramChannel, TelegramEventSource
 from .discord_channel import DiscordChannel, DiscordEventSource
 from .wecom_channel import WeComChannel, WeComEventSource
 from .wecom_app_channel import WeComAppChannel, WeComAppEventSource
+from .target import DeliveryTarget
+from .gateway import GatewayManager
 
 __all__ = [
     "Channel",
@@ -16,6 +18,8 @@ __all__ = [
     "WeComEventSource",
     "WeComAppChannel",
     "WeComAppEventSource",
+    "DeliveryTarget",
+    "GatewayManager",
 ]
 
 
@@ -39,3 +43,11 @@ def create_channels_from_config(config) -> list[Channel]:
         channels.append(WeComAppChannel(channel_config.wecom_app))
 
     return channels
+
+
+def create_gateway_manager(channels: list[Channel]) -> GatewayManager:
+    """从 Channel 列表创建 GatewayManager。"""
+    gm = GatewayManager()
+    for channel in channels:
+        gm.register(channel)
+    return gm

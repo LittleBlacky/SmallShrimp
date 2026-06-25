@@ -25,6 +25,7 @@ class CronDef:
     schedule: str
     prompt: str
     one_off: bool = False
+    delivery_target: str = ""  # 可选，指定投递平台名（例如 "telegram"、"wecom_app"）
 
     @classmethod
     def from_file(cls, path: Path) -> "CronDef | None":
@@ -52,6 +53,7 @@ class CronDef:
                 schedule=schedule,
                 prompt=body,
                 one_off=frontmatter.get("one_off", False),
+                delivery_target=frontmatter.get("delivery_target", ""),
             )
         except (KeyError, yaml.YAMLError) as e:
             logger.warning(f"Invalid cron file {path}: {e}")

@@ -83,8 +83,10 @@ class DiscordChannel(Channel[DiscordEventSource]):
         @self._client.event
         async def on_ready():
             logger.info(f"Discord 已登录为 {self._client.user}")
+            self._stop_event.set()  # 标记就绪
 
-        self._client.run(self.config.bot_token, loop=asyncio.get_event_loop())
+        # 使用 async start() 替代同步 blocking 的 run()
+        await self._client.start(self.config.bot_token)
 
     async def reply(self, content: str, source: DiscordEventSource) -> None:
         """回复消息。"""
