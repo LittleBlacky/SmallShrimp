@@ -4,6 +4,8 @@ from fastapi import FastAPI, WebSocket, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .context import Context
+from .api import sessions as sessions_api
+from .api import config as config_api
 
 
 def create_app(context: Context) -> FastAPI:
@@ -21,6 +23,10 @@ def create_app(context: Context) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 桌面端 API 路由
+    app.include_router(sessions_api.router)
+    app.include_router(config_api.router)
 
     # WebSocket 端点
     @app.websocket("/ws")
