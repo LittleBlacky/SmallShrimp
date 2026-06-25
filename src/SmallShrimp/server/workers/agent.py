@@ -5,17 +5,17 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from .worker import SubscriberWorker
-from ..core.agent import Agent
-from ..core.events import (
+from .base import SubscriberWorker
+from ...core.agent import Agent
+from ...core.events import (
     InboundEvent, OutboundEvent, CliEventSource,
     AgentEventSource, DispatchEvent, DispatchResultEvent,
 )
-from ..core.commands.registry import CommandRegistry
+from ...core.commands.registry import CommandRegistry
 from typing import Union
 
 if TYPE_CHECKING:
-    from .context import Context
+    from ..context import Context
 
 logger = logging.getLogger(__name__)
 

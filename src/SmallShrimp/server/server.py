@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 
-from .worker import Worker
-from .agent_worker import AgentWorker
-from .delivery_worker import DeliveryWorker
-from .channel_worker import ChannelWorker
-from .websocket_worker import WebSocketWorker
-from .cron_worker import CronWorker
+from .workers.base import Worker
+from .workers.agent import AgentWorker
+from .workers.delivery import DeliveryWorker
+from .workers.channel import ChannelWorker
+from .workers.websocket import WebSocketWorker
+from .workers.cron import CronWorker
 from .app import create_app
 from .context import Context
 

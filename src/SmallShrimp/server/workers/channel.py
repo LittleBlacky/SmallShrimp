@@ -4,11 +4,11 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
-from ..core.events import EventSource, InboundEvent
-from .worker import Worker
+from ...core.events import EventSource, InboundEvent
+from .base import Worker
 
 if TYPE_CHECKING:
-    from .context import Context
+    from ..context import Context
 
 
 class ChannelWorker(Worker):

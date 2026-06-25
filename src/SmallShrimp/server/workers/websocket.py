@@ -10,11 +10,11 @@ from fastapi import WebSocket
 from fastapi.websockets import WebSocketDisconnect
 from pydantic import ValidationError
 
-from .worker import SubscriberWorker
-from ..core.events import Event, EventSource, InboundEvent, OutboundEvent
+from .base import SubscriberWorker
+from ...core.events import Event, EventSource, InboundEvent, OutboundEvent
 
 if TYPE_CHECKING:
-    from .context import Context
+    from ..context import Context
 
 logger = logging.getLogger(__name__)
 

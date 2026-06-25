@@ -6,12 +6,12 @@ import random
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from ..core.events import OutboundEvent
-from .worker import SubscriberWorker
+from ...core.events import OutboundEvent
+from .base import SubscriberWorker
 
 if TYPE_CHECKING:
-    from .context import Context
-    from ..channels.base import Channel
+    from ..context import Context
+    from ...channels.base import Channel
 
 logger = logging.getLogger(__name__)
 
