@@ -3,7 +3,7 @@ import type {Message, ToolCall} from "@shared/types";
 import {useState} from "react";
 
 export function ChatView({onSend}: {onSend: (msg: string) => void}) {
-  const messages = useChatStore((s: { messages: Message[] }) => s.messages);
+  const messages = useChatStore((s: {messages: Message[]}) => s.messages);
   const [input, setInput] = useState("");
 
   const handleSend = () => {
