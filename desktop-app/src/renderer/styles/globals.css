@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-size: 14px;
+  --font-family: system-ui, -apple-system, sans-serif;
+  --font-family-mono: "JetBrains Mono", "Cascadia Code", monospace;
+}
+
+body {
+  font-size: var(--font-size);
+  font-family: var(--font-family);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 暗色主题 */
+.dark {
+  color-scheme: dark;
+}
+
+/* 自定义标题栏拖拽区 */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
