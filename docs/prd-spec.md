@@ -12,19 +12,36 @@
 
 ## 2. 文档组织
 
+按**需求**组织，而非按端。每个需求独立一个编号文件夹，内有一份 PRD 覆盖所有涉及层（Agent 核心 / 后端 API / 前端 UI）。
+
 ```
 docs/
 ├── prd-spec.md              # 本规范（编写标准）
-├── prd-index.md             # PRD 索引（列出所有 PRD 及关联）
+├── prd-index.md             # PRD 索引（列出所有 PRD 及关联依赖）
 ├── templates/
 │   └── PRD-TEMPLATE.md      # 标准 PRD 模板
-├── desktop/                 # 桌面端
-│   ├── PRD.md
-│   └── DEVLOG.md
-├── backend/                 # 后端服务（未来）
-├── web/                     # Web 前端（未来）
-└── mobile/                  # 移动端（未来）
+├── 01-agent-chat/           # 需求: Agent 聊天
+│   └── PRD.md               # 覆盖 Agent 层 + API 层 + UI 层
+├── 02-agent-management/     # 需求: Agent 管理
+├── 03-configuration/        # 需求: 配置管理
+├── 04-memory-system/        # 需求: 记忆系统
+├── 05-skill-system/         # 需求: 技能系统
+├── 06-cron-tasks/           # 需求: 定时任务
+├── 07-desktop-shell/        # 需求: 桌面壳（Electron 专属）
+└── ...                      # 按编号递增
 ```
+
+### 2.1 PRD 内部分层
+
+每份 PRD 按层分节，而非按端：
+
+```markdown
+## 4. Agent 核心层设计   # 消息流、会话逻辑、数据结构
+## 5. 后端 API 层设计     # REST/WebSocket 接口
+## 6. 前端/桌面 UI 层设计  # 交互、布局、组件
+```
+
+无该层的需求可省略对应节。如 07-desktop-shell 只有 Electron 层。
 
 ---
 
