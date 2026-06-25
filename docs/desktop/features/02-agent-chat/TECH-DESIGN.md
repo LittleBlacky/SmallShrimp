@@ -271,6 +271,7 @@ function StreamingText({ content }: { content: string }) {
 ```
 
 **性能保障：**
+
 - `MessageItem` 用 `React.memo` + 浅比较，只重渲染变动的消息
 - 流式结束时切换为静态 `MarkdownRenderer`，停止光标动画
 
