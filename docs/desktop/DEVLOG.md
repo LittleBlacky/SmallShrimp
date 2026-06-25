@@ -32,5 +32,5 @@
 
 ### 2026-06-25
 
-- PRD 重构为按需求组织（01~07），桌面壳对应 07-desktop-shell
+- PRD 确立两级结构：`desktop/PRD.md`（总纲）+ `features/`（7 个子需求）
 - 技术选型：Electron 28+ / React 18 / TypeScript / Tailwind CSS / Zustand

@@ -84,6 +84,7 @@ mcp_servers         → 动态列表（添加/删除/编辑每条）
 ```
 
 **交互：**
+
 - 修改后自动保存（debounce 1s）或手动「保存」按钮
 - 保存后通过 `/api/config` PUT 写回，Server 热重载
 - API Key 字段默认隐藏，点击眼睛图标显示
