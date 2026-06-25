@@ -142,7 +142,7 @@ class TestWebSocketWorkerChain:
 
     def test_websocket_message_model(self):
         """测试 WebSocketMessage 模型。"""
-        from src.SmallShrimp.server.websocket_worker import WebSocketMessage
+        from src.SmallShrimp.server.workers.websocket import WebSocketMessage
 
         msg = WebSocketMessage(source="user-123", content="hello")
         assert msg.source == "user-123"
@@ -183,7 +183,7 @@ class TestDeliveryWorkerHelpers:
 
     def test_chunk_message(self):
         """测试消息分块。"""
-        from src.SmallShrimp.server.delivery_worker import chunk_message
+        from src.SmallShrimp.server.workers.delivery import chunk_message
 
         chunks = chunk_message("short message", 4096)
         assert len(chunks) == 1
@@ -195,7 +195,7 @@ class TestDeliveryWorkerHelpers:
 
     def test_compute_backoff_ms(self):
         """测试退避时间计算。"""
-        from src.SmallShrimp.server.delivery_worker import compute_backoff_ms
+        from src.SmallShrimp.server.workers.delivery import compute_backoff_ms
 
         backoff1 = compute_backoff_ms(1)
         assert backoff1 >= 4000 and backoff1 <= 6000

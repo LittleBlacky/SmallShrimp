@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 """Context 测试。"""
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -84,7 +84,7 @@ def test_context_agent_receives_memory_manager_in_prompt(workspace_tmp):
     _write_minimal_workspace(workspace_tmp)
     context = Context.from_workspace(workspace_tmp)
     try:
-        context.memory_manager.remember_profile("我叫zane")
+        context.memory_manager.provider.store("profile", "我叫zane")
         agent_def = context.agent_loader.load("pickle")
         agent = Agent(
             agent_def,

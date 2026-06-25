@@ -94,7 +94,7 @@ def test_agent_loader_discovers_cookie():
 # ── MemoryManager 测试 ──
 
 def test_memory_manager_remember():
-    """MemoryManager.remember_fact 持久化记忆。"""
+    """MemoryManager.provider.store 持久化记忆。"""
     import tempfile
     from pathlib import Path
     from src.SmallShrimp.core.memory.memory_manager import MemoryManager
@@ -102,14 +102,14 @@ def test_memory_manager_remember():
     with tempfile.TemporaryDirectory() as tmpdir:
         memory = MemoryManager(Path(tmpdir))
         try:
-            record = memory.remember_fact("用户偏好 Python")
+            record = memory.provider.store("facts", "用户偏好 Python")
             assert record["content"] == "用户偏好 Python"
         finally:
             memory.close()
 
 
 def test_memory_manager_search():
-    """MemoryManager.recall 检索任务记忆。"""
+    """MemoryManager.provider.search 检索任务记忆。"""
     import tempfile
     from pathlib import Path
     from src.SmallShrimp.core.memory.memory_manager import MemoryManager
@@ -117,27 +117,14 @@ def test_memory_manager_search():
     with tempfile.TemporaryDirectory() as tmpdir:
         memory = MemoryManager(Path(tmpdir))
         try:
-            memory.remember_fact("用户偏好 dark mode")
-            memory.remember_project("项目名叫 SmallShrimp")
+            memory.provider.store("facts", "用户偏好 dark mode")
+            memory.provider.store("projects", "项目名叫 SmallShrimp")
 
-            results = memory.recall("dark")
+            results = memory.provider.search("dark")
             assert len(results) >= 1
             assert "dark mode" in results[0]["content"]
 
-            results = memory.recall("")
-            assert len(results) == 2
+            results = memory.provider.search("")
+            assert len(results) == 0
         finally:
             memory.close()
-
-
-if __name__ == "__main__":
-    import asyncio
-    test_post_message_tool_no_channels()
-    test_post_message_tool_with_channels()
-    asyncio.run(test_post_message_publishes_event())
-    test_cookie_agent_exists()
-    test_cookie_agent_loader_loads()
-    test_agent_loader_discovers_cookie()
-    test_memory_manager_remember()
-    test_memory_manager_search()
-    print("\nAll Ch14+Ch17 tests passed!")

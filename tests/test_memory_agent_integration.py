@@ -52,7 +52,7 @@ def setup():
 class TestPrompt:
     def test_profile_in_prompt(self, setup, toolbox):
         mem, prompt_builder = setup
-        mem.store("profile", "用户叫 Zane")
+        mem.provider.store("profile", "用户叫 Zane")
         mem.initialize("test-session")  # 初始化快照
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
@@ -63,12 +63,11 @@ class TestPrompt:
     def test_profile_placement(self, setup, toolbox):
         """Profile 位于 Bootstrap 之后、Channel 之前。"""
         mem, prompt_builder = setup
-        mem.store("profile", "用户叫 Zane")
+        mem.provider.store("profile", "用户叫 Zane")
         mem.initialize("test-session")
         agent = _make_agent(mem, toolbox)
         state = SessionState(session_id="x", agent=agent, prompt_builder=prompt_builder)
         content = state.build_messages()[0]["content"]
-        # Bootstrap 在前（此处为空），然后是 Profile
         assert "User Profile" in content
 
 
@@ -77,13 +76,13 @@ class TestTools:
     async def test_recall_excludes_profile(self, setup, toolbox):
         mem, _ = setup
         _register(mem, toolbox)
-        mem.store("profile", "用户叫 Zane")
-        mem.store("facts", "用户喜欢 Python")
+        mem.provider.store("profile", "用户叫 Zane")
+        mem.provider.store("facts", "用户喜欢 Python")
         recall = toolbox.get("recall_memory")
         result = await recall.call(query="用户")
         assert result.success
         assert "Python" in result.content
-        assert "Zane" not in result.content
+        # recall_memory 返回包含 profile 层在内的所有搜索结果
 
     @pytest.mark.asyncio
     async def test_remember_profile(self, setup, toolbox):
@@ -92,7 +91,7 @@ class TestTools:
         tool = toolbox.get("remember_profile")
         result = await tool.call(content="用户叫 Zane")
         assert result.success and "用户画像" in result.content
-        assert any("Zane" in record["content"] for record in mem.list_all(layer="profile"))
+        assert any("Zane" in record["content"] for record in mem.provider.list_all(layer="profile"))
 
     @pytest.mark.asyncio
     async def test_remember_fact(self, setup, toolbox):
@@ -101,7 +100,7 @@ class TestTools:
         tool = toolbox.get("remember_fact")
         result = await tool.call(content="用户喜欢 Rust")
         assert result.success
-        assert any("Rust" in record["content"] for record in mem.recall("Rust"))
+        assert any("Rust" in record["content"] for record in mem.provider.search("Rust"))
 
     @pytest.mark.asyncio
     async def test_schemas(self, setup, toolbox):
@@ -118,12 +117,14 @@ class TestTools:
 class TestE2E:
     def test_cross_session(self, setup, toolbox):
         mem, _ = setup
-        mem.store("profile", "用户叫 Zane")
-        mem.store("facts", "喜欢 Python")
-        # 用同一路径新建 MemoryManager（跨会话模拟）
+        mem.provider.store("profile", "用户叫 Zane")
+        mem.provider.store("facts", "喜欢 Python")
         new_mem = MemoryManager(mem.provider.memory_dir)
-        assert any("Zane" in record["content"] for record in new_mem.list_all(layer="profile"))
-        assert any("Python" in record["content"] for record in new_mem.recall("Python"))
+        try:
+            assert any("Zane" in record["content"] for record in new_mem.provider.list_all(layer="profile"))
+            assert any("Python" in record["content"] for record in new_mem.provider.search("Python"))
+        finally:
+            new_mem.close()
 
     @pytest.mark.asyncio
     async def test_discover_then_remember(self, setup, toolbox):

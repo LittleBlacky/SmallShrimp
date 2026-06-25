@@ -4,7 +4,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from src.SmallShrimp.server.agent_worker import AgentWorker
+from src.SmallShrimp.server.workers.agent import AgentWorker
 
 
 @pytest.mark.asyncio

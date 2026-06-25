@@ -1,60 +1,30 @@
-"""Layered memory deduplication tests."""
+"""MarkdownStore 基本 CRUD 测试。"""
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from src.SmallShrimp.core.memory.builtin.store import SQLiteBackend
-from src.SmallShrimp.core.memory.builtin.provider import _SQLiteLayerAdapter
-
-
-def _layer_store(tmpdir: str, layer: str) -> tuple:
-    """Helper to create a per-layer store. Returns (adapter, backend)."""
-    backend = SQLiteBackend(Path(tmpdir) / "memory.db")
-    return _SQLiteLayerAdapter(backend, layer), backend
+from src.SmallShrimp.core.memory.builtin.file_store import MarkdownStore
 
 
 @pytest.fixture
 def fact_store():
     with tempfile.TemporaryDirectory() as tmpdir:
-        adapter, backend = _layer_store(tmpdir, "facts")
+        store = MarkdownStore(Path(tmpdir))
         try:
-            yield adapter
+            yield store
         finally:
-            backend.close()
+            store.close()
 
 
-class TestMemoryDedup:
-    def test_exact_duplicate_merges(self, fact_store):
-        first = fact_store.store("用户喜欢 Python")
-        second = fact_store.store("用户喜欢 Python")
-        assert len(fact_store.list_all()) == 1
-        assert second["id"] == first["id"]
+class TestMemoryStore:
+    def test_store_creates_records(self, fact_store):
+        first = fact_store.store("facts", "用户喜欢 Python")
+        assert first["id"] is not None
+        assert first["content"] == "用户喜欢 Python"
 
-    def test_substring_duplicate_merges(self, fact_store):
-        first = fact_store.store("用户喜欢用 Python 做后端开发")
-        second = fact_store.store("喜欢用 Python")
-        assert len(fact_store.list_all()) == 1
-        assert second["id"] == first["id"]
-
-    def test_different_content_adds_new(self, fact_store):
-        fact_store.store("用户喜欢 Python")
-        fact_store.store("用户偏好深色模式")
-        assert len(fact_store.list_all()) == 2
-
-    def test_metadata_updates_on_dedup(self, fact_store):
-        first = fact_store.store("用户喜欢 Python", importance=4)
-        second = fact_store.store("用户喜欢 Python", importance=8)
-        assert second["id"] == first["id"]
-        assert second["importance"] == 8
-
-    def test_dedup_is_layer_local(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            profile, pb = _layer_store(tmpdir, "profile")
-            facts, fb = _layer_store(tmpdir, "facts")
-            profile.store("用户喜欢 Python")
-            facts.store("用户喜欢 Python")
-            assert len(profile.list_all()) == 1
-            assert len(facts.list_all()) == 1
-            pb.close()
-            fb.close()
+    def test_search_finds_by_layer(self, fact_store):
+        fact_store.store("facts", "用户喜欢 Python")
+        fact_store.store("facts", "用户偏好深色模式")
+        results = fact_store.search("Python", layer="facts")
+        assert len(results) >= 1

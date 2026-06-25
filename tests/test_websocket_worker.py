@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import ValidationError
 
 from src.SmallShrimp.core.events import WebSocketEventSource, InboundEvent, OutboundEvent
-from src.SmallShrimp.server.websocket_worker import WebSocketWorker, WebSocketMessage
+from src.SmallShrimp.server.workers.websocket import WebSocketWorker, WebSocketMessage
 
 
 def test_websocket_message_valid():

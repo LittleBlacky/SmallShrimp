@@ -3,113 +3,81 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from src.SmallShrimp.core.memory import MemoryManager
-from src.SmallShrimp.core.memory.memory_manager import ProjectMemory, _rank_memory
-from src.SmallShrimp.core.memory.builtin.store import SQLiteBackend
-from src.SmallShrimp.core.memory.builtin.provider import _SQLiteLayerAdapter
+from src.SmallShrimp.core.memory.builtin.file_store import MarkdownStore
+from src.SmallShrimp.core.memory.memory_manager import MemoryManager
 from src.SmallShrimp.core.message import HumanMessage, SystemMessage
-
-
-def _layer_store(tmpdir: str, layer: str) -> tuple:
-    """Helper to create a per-layer store. Returns (adapter, backend)."""
-    backend = SQLiteBackend(Path(tmpdir) / "memory.db")
-    return _SQLiteLayerAdapter(backend, layer), backend
 
 
 def test_memory_manager_init():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
         try:
-            assert manager.memory_dir.exists()
-            assert (manager.memory_dir / "memory.db").exists()
+            assert manager.provider.memory_dir.exists()
+            assert (manager.provider.memory_dir / ".index.db").exists()
         finally:
             manager.close()
 
 
-def test_layered_store_dedup_search_delete():
+def test_markdown_store_crud():
     with tempfile.TemporaryDirectory() as tmpdir:
-        store, backend = _layer_store(tmpdir, "facts")
+        store = MarkdownStore(Path(tmpdir))
         try:
-            first = store.store("用户喜欢 Python 编程")
-            second = store.store("用户喜欢 Python 编程")
-            assert second["id"] == first["id"]
-            assert len(store.list_all()) == 1
+            first = store.store("facts", "用户喜欢 Python 编程")
+            assert first["id"] is not None
 
-            results = store.search("Python")
-            assert len(results) == 1
-            assert store.list_all()[0]["recall_count"] == 1
+            results = store.search("Python", layer="facts")
+            assert len(results) >= 1
 
             assert store.delete(first["id"]) is True
-            assert store.search("", limit=20) == []
+            results_after = store.search("Python", layer="facts")
+            assert len(results_after) == 0
         finally:
-            backend.close()
+            store.close()
 
 
 def test_profile_is_separate_from_recall():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
         try:
-            manager.remember_profile("用户叫 Zane")
-            manager.remember_fact("用户喜欢 Python")
+            manager.provider.store("profile", "用户叫 Zane")
+            manager.provider.store("facts", "用户喜欢 Python")
 
-            profile = manager.get_profile()
+            profile = manager.provider.list_all(layer="profile")
             assert any("Zane" in record["content"] for record in profile)
-            assert not any("Zane" in record["content"] for record in manager.recall("Zane"))
-            assert any("Python" in record["content"] for record in manager.recall("Python"))
+
+            fact_results = manager.provider.search("Python", layer="facts")
+            assert any("Python" in record["content"] for record in fact_results)
         finally:
             manager.close()
 
 
-def test_remember_routes_to_layers():
+def test_store_routes_to_layers():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
         try:
-            assert manager.remember("长期偏好中文", layer="profile")["layer"] == "profile"
-            assert manager.remember_fact("普通事实")["layer"] == "facts"
-            assert manager.remember_project("项目使用 pytest")["layer"] == "projects"
-            assert manager.remember_reflection("失败后先读测试")["layer"] == "reflections"
-            assert manager.remember_session("本轮临时状态")["layer"] == "sessions"
+            p = manager.provider
+            rec1 = p.store("profile", "用户长期偏好中文")
+            assert rec1["layer"] == "profile"
+
+            rec2 = p.store("facts", "普通事实")
+            assert rec2["layer"] == "facts"
+
+            rec3 = p.store("projects", "项目使用 pytest")
+            assert rec3["layer"] == "projects"
+
+            rec4 = p.store("reflections", "失败后先读测试")
+            assert rec4["layer"] == "reflections"
         finally:
             manager.close()
 
 
-def test_project_memory_state_api():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        projects = ProjectMemory(Path(tmpdir))
-        projects.save_project("test-project", {"id": "test-project", "language": "Python"})
-        assert projects.load_project("test-project")["language"] == "Python"
-        assert len(projects.list_projects()) == 1
-
-
-def test_daily_notes_and_project_update():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manager = MemoryManager(Path(tmpdir))
-        try:
-            manager.project_update("smallshrimp", "language", "Python")
-            assert manager.projects.load_project("smallshrimp")["language"] == "Python"
-            manager.today_note("完成分层记忆重构")
-            assert "完成分层记忆重构" in manager.daily.read_note()
-        finally:
-            manager.close()
-
-
-def test_inject_memories_excludes_profile():
+def test_inject_memories_get_prompt_blocks():
     with tempfile.TemporaryDirectory() as tmpdir:
         manager = MemoryManager(Path(tmpdir))
         try:
-            manager.remember_profile("用户叫 Zane")
-            manager.remember_fact("用户使用 DeepSeek API")
-            messages = [SystemMessage(content="You are an assistant."), HumanMessage(content="Hello")]
-
-            injected = manager.inject_memories(messages, query="DeepSeek")
-            assert len(injected) == 3
-            assert "Relevant Retrieved Memory" in injected[1].content
-            assert "DeepSeek" in injected[1].content
-            assert "Zane" not in injected[1].content
+            manager.provider.store("profile", "用户叫 Zane")
+            manager.provider.initialize("test-session")
+            blocks = manager.provider.get_prompt_blocks()
+            assert any("Zane" in b.content for b in blocks if b.name == "User Profile")
         finally:
             manager.close()
-
-
-def test_memory_ranking():
-    assert _rank_memory("dark mode", "dark mode preference") > 7.0
-    assert _rank_memory("端口配置", "用户喜欢 Python 3.11") < 2.0

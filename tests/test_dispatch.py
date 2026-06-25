@@ -74,7 +74,7 @@ def test_event_serialization_roundtrip():
 @pytest.mark.asyncio
 async def test_agent_worker_handles_dispatch_event():
     """AgentWorker 订阅并处理 DispatchEvent。"""
-    from src.SmallShrimp.server.agent_worker import AgentWorker
+    from src.SmallShrimp.server.workers.agent import AgentWorker
     from src.SmallShrimp.core.events import DispatchEvent, AgentEventSource
 
     context = MagicMock()

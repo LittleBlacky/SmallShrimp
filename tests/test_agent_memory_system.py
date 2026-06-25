@@ -1,4 +1,4 @@
-﻿"""Agent-level memory integration tests.
+"""Agent-level memory integration tests.
 
 These tests exercise the real AgentSession.chat loop with a fake LLM so memory
 is validated as part of prompt construction, tool schemas, tool execution, and
@@ -132,7 +132,7 @@ async def test_agent_chat_writes_profile_then_prompt_uses_it_next_turn(workspace
 
         first_answer = await session.chat("记住我叫 Zane")
         assert first_answer == "已记住你的名字。"
-        assert any(record["content"] == "用户叫 Zane" for record in memory.list_all(layer="profile"))
+        assert any(record["content"] == "用户叫 Zane" for record in memory.provider.list_all(layer="profile"))
 
         second_answer = await session.chat("我叫什么？")
         assert second_answer == "你叫 Zane。"
@@ -147,8 +147,8 @@ async def test_agent_chat_recalls_task_memory_but_not_profile(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
     try:
-        memory.store("profile", "用户叫 Zane")
-        memory.store("projects", "SmallShrimp 使用 pytest 运行测试")
+        memory.provider.store("profile", "用户叫 Zane")
+        memory.provider.store("projects", "SmallShrimp 使用 pytest 运行测试")
         llm = FakeDeepSeekLLM([
             {
                 "content": "",
@@ -186,7 +186,7 @@ async def test_agent_chat_does_not_repeat_surfaced_task_memory(workspace_tmp):
     workspace = workspace_tmp
     memory = MemoryManager(workspace / "memories")
     try:
-        memory.store("projects", "SmallShrimp 使用 pytest 运行测试")
+        memory.provider.store("projects", "SmallShrimp 使用 pytest 运行测试")
         llm = FakeDeepSeekLLM([
             {
                 "content": "",

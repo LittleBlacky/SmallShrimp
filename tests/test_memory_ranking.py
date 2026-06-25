@@ -1,6 +1,6 @@
 from __future__ import annotations
 """记忆混合词法评分测试。"""
-from src.SmallShrimp.core.memory.memory_manager import _rank_memory
+from src.SmallShrimp.core.memory.builtin.common import _rank_memory
 
 
 def test_exact_match_highest():

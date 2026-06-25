@@ -1,7 +1,7 @@
 from __future__ import annotations
 """Server Workers 测试。"""
 import pytest
-from src.SmallShrimp.server.delivery_worker import (
+from src.SmallShrimp.server.workers.delivery import (
     DeliveryWorker,
     chunk_message,
     compute_backoff_ms,
