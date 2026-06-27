@@ -239,42 +239,6 @@ class MemoryManager:
             return ""
         return "\n".join(f"- [{r.get('layer', '')}] {r.get('content', '')}" for r in records)
 
-    async def ingest(
-        self,
-        source_text: str,
-        llm_caller=None,
-        store_entries: bool = True,
-    ) -> dict:
-        """Ingest a document: two-step CoT analysis → store entries + graph.
-
-        Args:
-            source_text: Document to ingest
-            llm_caller: Object with async .chat(messages) -> dict
-            store_entries: Whether to auto-store generated memory entries
-
-        Returns:
-            {"entries_stored": int, "entities_created": int, "relations_created": int}
-        """
-        from .ingest import ingest_document
-
-        graph = self._provider._graph_store if hasattr(self._provider, '_graph_store') else None
-        result = await ingest_document(
-            source_text, llm_caller, graph=graph,
-        )
-
-        entries_stored = 0
-        if store_entries and result.memory_entries:
-            for entry in result.memory_entries:
-                store_result = self.store("facts", entry, source="ingest")
-                if store_result.get("action") == "write":
-                    entries_stored += 1
-
-        return {
-            "entries_stored": entries_stored,
-            "entities_created": result.entities_created,
-            "relations_created": result.relations_created,
-        }
-
     def list_all(self, **kwargs) -> list[dict]:
         return self._provider.list_all(**kwargs)
 
