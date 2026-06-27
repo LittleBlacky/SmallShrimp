@@ -89,6 +89,7 @@ class BuiltinProvider(MemoryProvider):
         }
         self._snapshot_profile: list[MemoryRecord] | None = None
         self._snapshot_constraints: list[MemoryRecord] | None = None
+        self._graph_store = None  # Lazy init
 
     @property
     def name(self) -> str:
@@ -98,7 +99,18 @@ class BuiltinProvider(MemoryProvider):
         return self.memory_dir.exists()
 
     def close(self) -> None:
+        if self._graph_store:
+            self._graph_store.close()
         self._store.close()
+
+    @property
+    def graph_store(self):
+        """Lazy-init graph store."""
+        if self._graph_store is None:
+            from ..graph_store import GraphStore
+            db_path = self.memory_dir / ".graph.db"
+            self._graph_store = GraphStore(db_path)
+        return self._graph_store
 
     # ── 生命周期 ────────────────────────────────────────
 
@@ -164,10 +176,29 @@ class BuiltinProvider(MemoryProvider):
     # ── 前置召回 ────────────────────────────────────────
 
     def prefetch(self, query: str, session_id: str = "") -> list[dict]:
-        """按需召回 facts/projects/reflections。"""
+        """按需召回 facts/projects/reflections + 知识图谱。"""
         results: list[dict] = []
         for layer in _PREFETCH_LAYERS:
             results.extend(self._stores[layer].search(query, limit=5))
+        results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
+
+        # Graph enrichment: add graph context if available
+        if self._graph_store:
+            try:
+                from ..hybrid_retrieval import hybrid_search, enrich_with_neighbors
+                scored = hybrid_search(query, self._graph_store, limit=3)
+                if scored:
+                    scored = enrich_with_neighbors(scored, self._graph_store, max_neighbors=2)
+                    for se in scored:
+                        entry = f"[图谱] {se.entity.name} ({se.entity.type})"
+                        if se.entity.description:
+                            entry += f": {se.entity.description}"
+                        if se.neighbor_context:
+                            entry += f"\n{se.neighbor_context}"
+                        results.append({"layer": "graph", "content": entry, "fts_rank": se.final_score})
+            except Exception:
+                pass  # Graph is optional
+
         results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
         return results[:5]
 
@@ -274,4 +305,41 @@ class BuiltinProvider(MemoryProvider):
             count = self.consolidate(threshold=threshold)
             return f"合并了 {count} 对相似记忆。" if count else "没有找到可合并的记忆。"
 
-        return [recall_memory, remember_profile, remember_fact, remember_project, remember_reflection, remember_constraint, consolidate_memories]
+        @tool(description="搜索知识图谱。返回实体及其关系。用于查找人物、概念、技术之间的关联。")
+        async def search_graph(query: str, limit: int = 5) -> str:
+            from ..hybrid_retrieval import hybrid_search, enrich_with_neighbors, format_retrieval_context
+            scored = hybrid_search(query, self.graph_store, limit=limit)
+            if not scored:
+                return f"知识图谱中未找到与 '{query}' 相关的实体。"
+            scored = enrich_with_neighbors(scored, self.graph_store)
+            return format_retrieval_context(scored)
+
+        @tool(description="将知识三元组写入图谱。输入 JSON 数组，每个元素含 subject/subject_type/predicate/object/object_type。")
+        async def store_triplets(triplets_json: str) -> str:
+            import json as _json
+            from ..ontology import normalize_entity_type, normalize_predicate
+            try:
+                items = _json.loads(triplets_json)
+            except _json.JSONDecodeError:
+                return "JSON 解析失败，请传入有效的 JSON 数组。"
+            if not isinstance(items, list):
+                return "请传入 JSON 数组。"
+            gs = self.graph_store
+            stored = 0
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                subj = item.get("subject", "").strip()
+                obj = item.get("object", "").strip()
+                if not subj or not obj:
+                    continue
+                s_type = normalize_entity_type(item.get("subject_type", "other"))
+                o_type = normalize_entity_type(item.get("object_type", "other"))
+                pred = normalize_predicate(item.get("predicate", "related_to"))
+                gs.upsert_entity(subj, s_type)
+                gs.upsert_entity(obj, o_type)
+                gs.add_relation(subj, pred, obj)
+                stored += 1
+            return f"已存储 {stored} 条三元组到知识图谱。"
+
+        return [recall_memory, remember_profile, remember_fact, remember_project, remember_reflection, remember_constraint, consolidate_memories, search_graph, store_triplets]
