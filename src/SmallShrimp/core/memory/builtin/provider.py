@@ -52,7 +52,7 @@ class BuiltinProvider(MemoryProvider):
                   searchable=True, inject=None)
     projects = Layer("projects", "项目上下文（按需检索）",
                      searchable=True, inject=None)
-    reflections = Layer("reflections", "经验教训（每轮自动召回，优先级高）",
+    reflections = Layer("reflections", "操作经验（失败模式、成功模式、用户偏好、环境知识，每轮自动召回）",
                         searchable="auto", inject=None)
     constraints = Layer("constraints", "硬性约束（不参与压缩，每轮强制注入）",
                         searchable=True, inject="session")

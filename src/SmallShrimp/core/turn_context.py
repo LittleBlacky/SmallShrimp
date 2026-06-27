@@ -67,6 +67,7 @@ async def build_turn_context(
     # 4. Reset guardrails for this turn
     session._guardrail.reset()
     session._turn_failures.clear()
+    session._turn_successes.clear()
 
     # 5. Trust dialog (first entry only)
     if not session._trust_checked:

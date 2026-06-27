@@ -54,11 +54,13 @@ class Agent:
             )
         else:
             self.context_guard = context_guard
-        # Failure learner — 跨轮次记住失败模式
-        from ..core.failure_learning import FailureLearner
-        self.failure_learner = FailureLearner(
-            state_path=str(config.data.get("workspace", "workspace")) + "/.cache/failure_learning.json"
+        # Pattern learner — 跨轮次记住操作经验
+        from ..core.pattern_learning import PatternLearner
+        self.pattern_learner = PatternLearner(
+            state_path=str(config.data.get("workspace", "workspace")) + "/.cache/pattern_learning.json"
         )
+        # Backward compat alias
+        self.failure_learner = self.pattern_learner
         # Permission mode
         from ..core.permissions import PermissionMode, PermissionChecker
         mode_str = agent_def.llm.get("permission_mode", "default")
@@ -146,6 +148,7 @@ class AgentSession:
         from ..core.tool_guardrails import ToolCallGuardrailController
         self._guardrail = ToolCallGuardrailController()
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
+        self._turn_successes: list[dict] = []  # 本轮成功的工具调用
         self._trust_checked = False  # Trust Dialog 是否已检查
         self._on_tool_call = None  # 工具调用回调 (CLI 显示用)
         self._on_thinking = None  # 思考内容回调
@@ -249,14 +252,17 @@ class AgentSession:
                     # 注入 hint 让下一轮 LLM 看到（不重新生成本轮）
                     self.state.add_message(SystemMessage(content=hint))
 
-            # 跨轮次失败学习 + 自动写 reflections
-            notes = self.agent.failure_learner.observe_turn(self._turn_failures)
+            # 跨轮次模式学习 + 自动写 reflections
+            notes = self.agent.pattern_learner.observe_turn(
+                failures=self._turn_failures,
+                successes=self._turn_successes,
+            )
             for note in notes:
                 self.state.add_message(SystemMessage(content=note))
                 if self.agent.memory_manager:
                     try:
                         self.agent.memory_manager.store(
-                            "reflections", note, importance=7, source="failure_learner"
+                            "reflections", note, importance=7, source="pattern_learner"
                         )
                     except Exception:
                         pass
@@ -428,9 +434,11 @@ class AgentSession:
         elif decision.is_halt:
             result = append_guardrail_warning(result, decision)
 
-        # 记录失败用于跨轮次学习
+        # 记录成功/失败用于跨轮次学习
         if failed:
             self._turn_failures.append({"tool_name": name, "error": result})
+        else:
+            self._turn_successes.append({"tool_name": name, "detail": result[:200]})
 
         # 回调 CLI 显示
         if self._on_tool_call:
