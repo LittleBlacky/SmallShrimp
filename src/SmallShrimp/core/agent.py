@@ -45,8 +45,15 @@ class Agent:
         # 从 agent_def 获取 context_window 的 80% 作为压缩阈值
         context_window = agent_def.llm.get("context_window", 200000)
         token_threshold = int(context_window * 0.8)
-        from ..core.context_guard import ContextGuard
-        self.context_guard = ContextGuard(token_threshold=token_threshold) if context_guard is None else context_guard
+        if context_guard is None:
+            from ..core.context_engine import create_context_engine
+            engine_name = config.get("context_engine", "default")
+            self.context_guard = create_context_engine(
+                engine_name,
+                token_threshold=token_threshold,
+            )
+        else:
+            self.context_guard = context_guard
         # Failure learner — 跨轮次记住失败模式
         from ..core.failure_learning import FailureLearner
         self.failure_learner = FailureLearner(
@@ -128,8 +135,8 @@ class AgentSession:
     started_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
-        from ..core.tool_guardrails import ToolGuardrailController
-        self._guardrail = ToolGuardrailController()
+        from ..core.tool_guardrails import ToolCallGuardrailController
+        self._guardrail = ToolCallGuardrailController()
         self._turn_failures: list[dict] = []  # 本轮失败的工具调用
         self._trust_checked = False  # Trust Dialog 是否已检查
         self._on_tool_call = None  # 工具调用回调 (CLI 显示用)

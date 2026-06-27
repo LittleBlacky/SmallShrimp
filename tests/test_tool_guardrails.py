@@ -1,7 +1,7 @@
 from __future__ import annotations
 """Tool guardrail 测试。"""
 from src.SmallShrimp.core.tool_guardrails import (
-    ToolGuardrailController,
+    ToolCallGuardrailController,
     GuardrailConfig,
     append_guardrail_warning,
     GuardrailDecision,
@@ -9,7 +9,7 @@ from src.SmallShrimp.core.tool_guardrails import (
 
 
 def test_exact_failure_warns_after_2():
-    ctrl = ToolGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
     # 第 1 次失败 — 不警告
     d1 = ctrl.after_call("read", {"path": "a.txt"}, "Error: not found", failed=True)
     assert d1.action == "allow"
@@ -21,7 +21,7 @@ def test_exact_failure_warns_after_2():
 
 
 def test_same_tool_failure_warns_after_3():
-    ctrl = ToolGuardrailController(GuardrailConfig(same_tool_failure_warn_after=3))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(same_tool_failure_warn_after=3))
     # 同一工具，不同参数失败 3 次
     ctrl.after_call("grep", {"pattern": "x"}, "Error: timeout", failed=True)
     ctrl.after_call("grep", {"pattern": "y"}, "Error: timeout", failed=True)
@@ -32,7 +32,7 @@ def test_same_tool_failure_warns_after_3():
 
 
 def test_no_progress_warns_after_2():
-    ctrl = ToolGuardrailController(GuardrailConfig(no_progress_warn_after=2))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(no_progress_warn_after=2))
     # 只读工具返回相同结果 2 次
     ctrl.after_call("read", {"path": "a.txt"}, "same content", failed=False, is_read_only=True)
     d2 = ctrl.after_call("read", {"path": "a.txt"}, "same content", failed=False, is_read_only=True)
@@ -42,14 +42,14 @@ def test_no_progress_warns_after_2():
 
 
 def test_no_progress_different_result_ok():
-    ctrl = ToolGuardrailController(GuardrailConfig(no_progress_warn_after=2))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(no_progress_warn_after=2))
     ctrl.after_call("read", {"path": "a.txt"}, "content A", failed=False, is_read_only=True)
     d2 = ctrl.after_call("read", {"path": "a.txt"}, "content B", failed=False, is_read_only=True)
     assert d2.action == "allow"
 
 
 def test_success_clears_failure_counters():
-    ctrl = ToolGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
     ctrl.after_call("read", {"path": "a.txt"}, "Error: fail", failed=True)
     # 成功后清零
     d2 = ctrl.after_call("read", {"path": "a.txt"}, "success", failed=False)
@@ -60,7 +60,7 @@ def test_success_clears_failure_counters():
 
 
 def test_reset_clears_all():
-    ctrl = ToolGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
+    ctrl = ToolCallGuardrailController(GuardrailConfig(exact_failure_warn_after=2))
     ctrl.after_call("read", {"path": "a.txt"}, "Error: fail", failed=True)
     ctrl.after_call("read", {"path": "a.txt"}, "Error: fail", failed=True)
     assert ctrl._exact_failures

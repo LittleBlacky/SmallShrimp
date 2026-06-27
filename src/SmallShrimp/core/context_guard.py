@@ -17,6 +17,8 @@ import time
 
 from litellm import token_counter
 
+from .context_engine import ContextEngine
+
 if TYPE_CHECKING:
     from .session_state import SessionState
 
@@ -73,7 +75,7 @@ Here is the conversation to summarize:
 Output your summary strictly following the format above. Constraints section MUST contain the EXACT original text without any rewording."""
 
 
-class ContextGuard:
+class ContextGuard(ContextEngine):
 
     def __init__(
         self,

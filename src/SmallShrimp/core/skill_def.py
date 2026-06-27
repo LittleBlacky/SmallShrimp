@@ -12,15 +12,19 @@ class SkillDef:
     name: str
     description: str
     content: str = ""
+    triggers: list[str] | None = None
 
     def to_dict(self) -> dict:
         """转换为字典。"""
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
             "content": self.content,
         }
+        if self.triggers:
+            d["triggers"] = self.triggers
+        return d
 
     @classmethod
     def from_file(cls, path: str | Path) -> "SkillDef":
@@ -41,6 +45,7 @@ class SkillDef:
                     name=frontmatter.get("name", "") if frontmatter else "",
                     description=frontmatter.get("description", "") if frontmatter else "",
                     content=body,
+                    triggers=frontmatter.get("triggers") if frontmatter else None,
                 )
         # 无 frontmatter，使用纯内容
         return cls(

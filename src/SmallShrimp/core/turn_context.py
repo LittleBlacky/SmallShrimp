@@ -81,7 +81,28 @@ async def build_turn_context(
                 if approved:
                     agent.trust_manager.trust(cwd)
 
-    # 6. Read max_iterations from config
+    # 6. Memory intent detection
+    from .memory.intent import detect_memory_intent, render_memory_intent_hint
+    intent_signal = detect_memory_intent(original_text)
+    should_review_memory = intent_signal.triggered
+    memory_intent = intent_signal.confidence if intent_signal.triggered else None
+    if intent_signal.triggered:
+        intent_hint = render_memory_intent_hint(intent_signal)
+        user_message = f"{user_message}{intent_hint}"
+
+    # 7. Skill matching (pre-filter before LLM)
+    from .skill_matcher import match_skill
+    if agent.tool_registry:
+        from .skill_loader import SkillLoader
+        from pathlib import Path
+        skills_dir = agent.config.get("skills_dir", "workspace/skills")
+        skill_loader = SkillLoader(Path(skills_dir))
+        skills = skill_loader.discover_skills()
+        matched_skill = match_skill(original_text, skills)
+        if matched_skill:
+            user_message = f"[matched skill: {matched_skill}]\n\n{user_message}"
+
+    # 8. Read max_iterations from config
     max_iterations = agent.config.get("max_iterations", 50)
 
     return TurnContext(
@@ -89,4 +110,6 @@ async def build_turn_context(
         original_text=original_text,
         message=user_message,
         max_iterations=max_iterations,
+        should_review_memory=should_review_memory,
+        memory_intent=memory_intent,
     )
