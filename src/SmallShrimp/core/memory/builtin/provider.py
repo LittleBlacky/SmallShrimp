@@ -89,7 +89,14 @@ class BuiltinProvider(MemoryProvider):
         }
         self._snapshot_profile: list[MemoryRecord] | None = None
         self._snapshot_constraints: list[MemoryRecord] | None = None
-        self._graph_store = None  # Lazy init
+
+        # Graph store — shares MarkdownStore's SQLite connection
+        from ..graph_store import GraphStore
+        self._graph_store = GraphStore(conn=self._store._conn)
+
+        # Pipelines (created lazily by MemoryManager)
+        self._retrieval_pipeline = None
+        self._write_pipeline = None
 
     @property
     def name(self) -> str:
@@ -99,17 +106,13 @@ class BuiltinProvider(MemoryProvider):
         return self.memory_dir.exists()
 
     def close(self) -> None:
+        # GraphStore shares the connection, don't double-close
         if self._graph_store:
-            self._graph_store.close()
+            self._graph_store._conn = None  # Detach without closing
         self._store.close()
 
     @property
     def graph_store(self):
-        """Lazy-init graph store."""
-        if self._graph_store is None:
-            from ..graph_store import GraphStore
-            db_path = self.memory_dir / ".graph.db"
-            self._graph_store = GraphStore(db_path)
         return self._graph_store
 
     # ── 生命周期 ────────────────────────────────────────
@@ -182,20 +185,25 @@ class BuiltinProvider(MemoryProvider):
             results.extend(self._stores[layer].search(query, limit=5))
         results.sort(key=lambda r: r.get("fts_rank", 0) if "fts_rank" in r else 0)
 
-        # Graph enrichment: add graph context if available
+        # Graph enrichment via GraphSearcher
         if self._graph_store:
             try:
-                from ..hybrid_retrieval import hybrid_search, enrich_with_neighbors
-                scored = hybrid_search(query, self._graph_store, limit=3)
-                if scored:
-                    scored = enrich_with_neighbors(scored, self._graph_store, max_neighbors=2)
+                from ..searchers import GraphSearcher
+                searcher = GraphSearcher(self._graph_store, max_neighbors=2)
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Can't await in sync context — use fallback
+                    entities = self._graph_store.search_entities(query, limit=3)
+                    for e in entities:
+                        entry = f"[图谱] {e.name} ({e.type})"
+                        if e.description:
+                            entry += f": {e.description}"
+                        results.append({"layer": "graph", "content": entry, "fts_rank": 0.5})
+                else:
+                    scored = loop.run_until_complete(searcher.search(query, limit=3))
                     for se in scored:
-                        entry = f"[图谱] {se.entity.name} ({se.entity.type})"
-                        if se.entity.description:
-                            entry += f": {se.entity.description}"
-                        if se.neighbor_context:
-                            entry += f"\n{se.neighbor_context}"
-                        results.append({"layer": "graph", "content": entry, "fts_rank": se.final_score})
+                        results.append({"layer": "graph", "content": se.content, "fts_rank": se.score})
             except Exception:
                 pass  # Graph is optional
 
@@ -307,12 +315,15 @@ class BuiltinProvider(MemoryProvider):
 
         @tool(description="搜索知识图谱。返回实体及其关系。用于查找人物、概念、技术之间的关联。")
         async def search_graph(query: str, limit: int = 5) -> str:
-            from ..hybrid_retrieval import hybrid_search, enrich_with_neighbors, format_retrieval_context
-            scored = hybrid_search(query, self.graph_store, limit=limit)
+            from ..searchers import GraphSearcher
+            searcher = GraphSearcher(self.graph_store)
+            scored = await searcher.search(query, limit=limit)
             if not scored:
                 return f"知识图谱中未找到与 '{query}' 相关的实体。"
-            scored = enrich_with_neighbors(scored, self.graph_store)
-            return format_retrieval_context(scored)
+            lines = [f"找到 {len(scored)} 个相关实体："]
+            for se in scored:
+                lines.append(f"- {se.content}")
+            return "\n".join(lines)
 
         @tool(description="将知识三元组写入图谱。输入 JSON 数组，每个元素含 subject/subject_type/predicate/object/object_type。")
         async def store_triplets(triplets_json: str) -> str:

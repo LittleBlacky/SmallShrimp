@@ -1,5 +1,10 @@
 """RRF multi-phase retrieval for knowledge graph.
 
+.. deprecated::
+    Merged into pipeline.RetrievalPipeline with RRFRanker.
+    This module is kept for backward compatibility only.
+"""
+
 5-phase pipeline:
   Phase 1: Tokenized search (English stemming + CJK bigram + title bonus)
   Phase 2: Vector semantic search (chunk embedding → page aggregation)

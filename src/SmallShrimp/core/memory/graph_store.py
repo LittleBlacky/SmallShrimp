@@ -47,11 +47,23 @@ class GraphContext:
 
 
 class GraphStore:
-    """SQLite-backed knowledge graph with FTS5 search."""
+    """SQLite-backed knowledge graph with FTS5 search.
 
-    def __init__(self, db_path: str | Path):
-        self.db_path = str(db_path)
-        self._conn: sqlite3.Connection | None = None
+    Can share a connection with MarkdownStore by passing conn= at init.
+    Table names (entities/relations/entities_fts) don't conflict with
+    memory tables (memory_index/memory_fts/memory_vec).
+    """
+
+    def __init__(
+        self,
+        db_path: str | Path = "",
+        conn: sqlite3.Connection | None = None,
+    ):
+        self._external_conn = conn is not None
+        self.db_path = str(db_path) if not conn else ""
+        self._conn: sqlite3.Connection | None = conn
+        if self._conn is not None:
+            self._conn.row_factory = sqlite3.Row
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -124,9 +136,9 @@ class GraphStore:
         conn.commit()
 
     def close(self) -> None:
-        if self._conn:
+        if self._conn and not self._external_conn:
             self._conn.close()
-            self._conn = None
+        self._conn = None
 
     # ── Entity CRUD ──────────────────────────────────────
 

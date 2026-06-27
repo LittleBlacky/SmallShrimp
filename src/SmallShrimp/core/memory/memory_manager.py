@@ -46,11 +46,62 @@ class MemoryManager:
             promote_callback=self._promote_from_staging,
         )
 
+        # 统一管线
+        self._retrieval_pipeline = None
+        self._write_pipeline = None
+        self._init_pipelines()
+
     def _resolve_memory_dir(self) -> Path | None:
         """尝试解析记忆目录路径。"""
         if hasattr(self._provider, "memory_dir"):
             return self._provider.memory_dir
         return None
+
+    def _init_pipelines(self) -> None:
+        """Initialize retrieval and write pipelines if provider supports them."""
+        from .builtin.provider import BuiltinProvider
+        if not isinstance(self._provider, BuiltinProvider):
+            return
+
+        from .pipeline import RetrievalPipeline, WritePipeline, RRFRanker, BudgetController
+        from .searchers import FTS5Searcher, GraphSearcher
+        from .indexers import GraphIndexer
+
+        # RetrievalPipeline: FTS5 + Graph
+        searchers = [FTS5Searcher(self._provider._store)]
+        if self._provider._graph_store:
+            searchers.append(GraphSearcher(self._provider._graph_store))
+        self._retrieval_pipeline = RetrievalPipeline(
+            searchers=searchers,
+            ranker=RRFRanker(),
+            budget=BudgetController(),
+        )
+
+        # WritePipeline: Graph indexing (LLM caller injected later)
+        if self._provider._graph_store:
+            self._write_pipeline = WritePipeline(
+                indexers=[GraphIndexer(self._provider._graph_store)]
+            )
+
+    def set_llm_caller(self, llm_caller) -> None:
+        """Inject LLM caller for graph indexing (triplet extraction)."""
+        if self._write_pipeline:
+            from .indexers import GraphIndexer
+            graph = self._provider._graph_store if hasattr(self._provider, '_graph_store') else None
+            if graph:
+                self._write_pipeline = WritePipeline(
+                    indexers=[GraphIndexer(graph, llm_caller=llm_caller)]
+                )
+
+    @property
+    def retrieval_pipeline(self):
+        """Get the retrieval pipeline (for advanced usage)."""
+        return self._retrieval_pipeline
+
+    @property
+    def write_pipeline(self):
+        """Get the write pipeline (for advanced usage)."""
+        return self._write_pipeline
 
     def _promote_from_staging(self, content_hash: str, content: str,
                               layer: str, **kwargs: Any) -> None:
@@ -156,6 +207,12 @@ class MemoryManager:
         # action == "write" — 直接写入 Provider
         kwargs.setdefault("confidence", decision.confidence)
         record = self._provider.store(decision.target_layer, content, **kwargs)
+
+        # Trigger graph indexing (background, non-blocking)
+        if self._write_pipeline and record:
+            record_id = record.get("id", "") if isinstance(record, dict) else ""
+            self._write_pipeline.post_store_bg(decision.target_layer, content, str(record_id))
+
         return {
             "action": "write",
             "layer": decision.target_layer,
@@ -167,6 +224,56 @@ class MemoryManager:
 
     def recall(self, query: str, limit: int = 5, **kwargs) -> list[dict]:
         return self._provider.search(query, limit=limit, **kwargs)
+
+    async def recall_unified(self, query: str, limit: int = 10) -> str:
+        """Unified retrieval via RetrievalPipeline (FTS5 + Graph + RRF).
+
+        Returns formatted context string ready for LLM consumption.
+        Falls back to basic recall() if pipeline not available.
+        """
+        if self._retrieval_pipeline:
+            return await self._retrieval_pipeline.retrieve(query, limit=limit)
+        # Fallback: basic FTS5 recall
+        records = self.recall(query, limit=limit)
+        if not records:
+            return ""
+        return "\n".join(f"- [{r.get('layer', '')}] {r.get('content', '')}" for r in records)
+
+    async def ingest(
+        self,
+        source_text: str,
+        llm_caller=None,
+        store_entries: bool = True,
+    ) -> dict:
+        """Ingest a document: two-step CoT analysis → store entries + graph.
+
+        Args:
+            source_text: Document to ingest
+            llm_caller: Object with async .chat(messages) -> dict
+            store_entries: Whether to auto-store generated memory entries
+
+        Returns:
+            {"entries_stored": int, "entities_created": int, "relations_created": int}
+        """
+        from .ingest import ingest_document
+
+        graph = self._provider._graph_store if hasattr(self._provider, '_graph_store') else None
+        result = await ingest_document(
+            source_text, llm_caller, graph=graph,
+        )
+
+        entries_stored = 0
+        if store_entries and result.memory_entries:
+            for entry in result.memory_entries:
+                store_result = self.store("facts", entry, source="ingest")
+                if store_result.get("action") == "write":
+                    entries_stored += 1
+
+        return {
+            "entries_stored": entries_stored,
+            "entities_created": result.entities_created,
+            "relations_created": result.relations_created,
+        }
 
     def list_all(self, **kwargs) -> list[dict]:
         return self._provider.list_all(**kwargs)

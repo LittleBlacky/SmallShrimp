@@ -1,5 +1,9 @@
 """Hybrid retrieval — fusion of vector, fulltext, and importance scores.
 
+.. deprecated::
+    Merged into searchers.GraphSearcher and pipeline.RetrievalPipeline.
+    This module is kept for backward compatibility only.
+
 Fusion formula: 0.55 * vector + 0.30 * fulltext + 0.15 * importance
 Plus 1-hop neighbor context enrichment from graph store.
 """
