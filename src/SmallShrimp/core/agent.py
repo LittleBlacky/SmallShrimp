@@ -158,74 +158,27 @@ class AgentSession:
         
     async def chat(self, message: str) -> str:
         """发送消息，支持工具调用循环。"""
-        # MCP 懒初始化（首次 chat 时连接）
-        if not self.agent._mcp_registered:
-            self.agent._mcp_registered = True
-            from ..core.mcp import register_mcp_tools
-            await register_mcp_tools(self.agent.mcp_manager, self.agent.tool_registry)
+        from .turn_context import build_turn_context
+        from .message_sanitizer import sanitize_user_message, sanitize_tool_result, repair_tool_call_args
 
-        # 检测用户纠正信号（关键词 + 结构分析）
-        from ..core.correction import detect_correction_combined, render_correction_hint, CorrectionConfidence
-        # 获取上一条 assistant 消息内容作为结构分析上下文
-        prev_assistant = ""
-        for m in reversed(self.state.messages):
-            if isinstance(m, AssistantMessage) and m.content:
-                prev_assistant = m.content or ""
-                break
-        original_text = message  # 保存原始文本供 prefetch/auto-write 用
-        correction = detect_correction_combined(original_text, prev_assistant)
-        if correction:
-            hint = render_correction_hint(correction)
-            message = f"{hint}\n\n---\n\n{message}"
-            # HIGH 置信度纠正 → 自动写 profile
-            if correction.confidence == CorrectionConfidence.HIGH and self.agent.memory_manager:
-                try:
-                    self.agent.memory_manager.store(
-                        "profile", correction.phrase, source="correction"
-                    )
-                except Exception:
-                    pass
+        # Phase 1.1: TurnContext — 所有一次性初始化
+        ctx = await build_turn_context(self, message)
+        original_text = ctx.original_text
 
-        # 添加用户消息
-        user_msg = HumanMessage(content=message)
-        self.state.add_message(user_msg)
-
-        # 重置本轮 guardrail 计数器
-        self._guardrail.reset()
-        self._turn_failures.clear()
-
-        # Trust Dialog — 首次进入工作区检查信任
-        if not self._trust_checked:
-            self._trust_checked = True
-            cwd = os.getcwd()
-            if not self.agent.trust_manager.is_trusted(cwd):
-                warnings = self.agent.trust_manager.scan_dangerous(cwd)
-                if warnings and (confirm_fn := getattr(self, '_confirm_fn', None)):
-                    approved = confirm_fn(
-                        f"Trust directory '{cwd}'?\nDetected: {', '.join(warnings[:5])}"
-                    )
-                    if approved:
-                        self.agent.trust_manager.trust(cwd)
-
-        # 循环：直到 LLM 返回普通回复
-        while True:
-            # 检查并压缩上下文
+        # Phase 1.2: 有界迭代循环
+        for _iteration in range(ctx.max_iterations):
+            # 压缩上下文
             self.state = await self.agent.context_guard.check_and_compact(self.state)
 
             context_window = self.agent.agent_def.llm.get("context_window")
             messages = self.state.build_messages(max_context_tokens=context_window)
-
-            # 获取工具 schema
             schemas = self.agent.tool_registry.get_schemas()
 
-            # 调用 LLM（带 tools 和 pending_reasoning_content）
-            response = await self.agent.llm.chat(
-                messages,
-                tools=schemas,
-                reasoning_content=self.state.pending_reasoning_content,
+            # Phase 1.2: 带重试的 LLM 调用
+            response = await self._call_llm_with_retry(
+                messages, schemas, self.state.pending_reasoning_content,
             )
 
-            # 解析 LLM 返回
             reasoning = response.get("reasoning_content")
             should_store = response.get("should_store_reasoning", False)
             finish_reason = response.get("finish_reason", "stop")
@@ -238,37 +191,42 @@ class AgentSession:
                     pass
 
             if finish_reason == "tool_calls" and response["tool_calls"]:
-
                 # 保存 assistant 消息
                 assistant_with_tools = AssistantMessage(content="")
-                assistant_with_tools.tool_calls = response["tool_calls"]
-                # 有些 provider 需要把 reasoning_content 嵌入到 assistant 消息中
+                assistant_with_tools.tool_calls = repair_tool_call_args(response["tool_calls"])
                 if reasoning:
                     assistant_with_tools.reasoning_content = reasoning
                 self.state.add_message(assistant_with_tools)
-
-                # 由 thinking_strategy 决定是否保存 reasoning_content 到 pending
                 self.state.pending_reasoning_content = reasoning if should_store else None
 
                 # 并行执行只读工具，串行执行写工具
                 await self._execute_tool_calls(response["tool_calls"])
-
-                # 继续循环
                 continue
 
-            # 非 tool_calls 的停止原因（stop / length / content_filter）
+            # 非 tool_calls 的停止原因
             if finish_reason == "length":
                 response["content"] = (response.get("content") or "") + (
                     "\n\n[响应因达到最大 token 限制而被截断]"
                 )
 
-            assistant_msg = AssistantMessage(content=response["content"] or "")
+            content = response.get("content") or ""
+
+            # Phase 1.4: 空响应恢复 — 有 tool_calls 历史时 nudge 重试
+            if not content.strip() and self._had_tool_calls_this_turn():
+                nudge = "[System: 你刚执行了工具调用但返回了空响应。请继续分析或给出下一步操作。]"
+                nudge_response = await self._call_llm_with_retry(
+                    messages + [{"role": "user", "content": nudge}],
+                    schemas,
+                    self.state.pending_reasoning_content,
+                )
+                content = nudge_response.get("content") or ""
+
+            assistant_msg = AssistantMessage(content=content)
             self.state.add_message(assistant_msg)
 
             # 跨轮次失败学习 + 自动写 reflections
             notes = self.agent.failure_learner.observe_turn(self._turn_failures)
             for note in notes:
-                from ..core.message import SystemMessage
                 self.state.add_message(SystemMessage(content=note))
                 if self.agent.memory_manager:
                     try:
@@ -286,13 +244,49 @@ class AgentSession:
                 try:
                     self.agent.memory_manager.sync_turn(
                         user_content=original_text,
-                        assistant_content=response["content"] or "",
+                        assistant_content=content,
                         session_id=self.session_id,
                     )
                 except Exception:
                     pass
 
-            return response["content"] or ""
+            return content
+
+        # 迭代预算耗尽
+        return "[达到最大工具调用轮次限制，请简化请求后重试。]"
+
+    async def _call_llm_with_retry(
+        self,
+        messages: list,
+        schemas: list,
+        reasoning_content: str | None = None,
+        max_retries: int = 3,
+    ) -> dict:
+        """带指数退避重试的 LLM 调用。"""
+        import asyncio
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return await self.agent.llm.chat(
+                    messages,
+                    tools=schemas,
+                    reasoning_content=reasoning_content,
+                )
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt + 0.5 * attempt
+                    await asyncio.sleep(delay)
+        raise last_error  # type: ignore[misc]
+
+    def _had_tool_calls_this_turn(self) -> bool:
+        """检查本轮是否有 tool_calls 历史。"""
+        for m in reversed(self.state.messages):
+            if isinstance(m, HumanMessage):
+                break
+            if isinstance(m, AssistantMessage) and m.tool_calls:
+                return True
+        return False
 
     async def _execute_tool_calls(self, tool_calls: list) -> None:
         """并行执行只读工具，串行执行写工具。含 guardrail 检测。"""

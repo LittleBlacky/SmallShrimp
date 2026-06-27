@@ -160,6 +160,17 @@ class Config:
             self._reloader.stop()
             self._reloader = None
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """获取配置值，支持点号分隔的嵌套键。"""
+        keys = key.split(".")
+        obj = self.data
+        for k in keys:
+            if isinstance(obj, dict) and k in obj:
+                obj = obj[k]
+            else:
+                return default
+        return obj
+
     def get_provider_config(self, name: str) -> dict[str, Any]:
         """获取指定 provider 的配置。"""
         providers = self.data.get("providers", {})
