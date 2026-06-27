@@ -239,6 +239,16 @@ class AgentSession:
             assistant_msg = AssistantMessage(content=content)
             self.state.add_message(assistant_msg)
 
+            # 可选验证器：检查回复质量
+            capabilities = self.agent.agent_def.metadata.get("capabilities", {}) if hasattr(self.agent.agent_def, "metadata") else {}
+            if capabilities.get("verifier"):
+                from .verifier import verify_response, render_verification_hint
+                v_result = await verify_response(original_text, content, self.agent.llm)
+                if not v_result.passed:
+                    hint = render_verification_hint(v_result)
+                    # 注入 hint 让下一轮 LLM 看到（不重新生成本轮）
+                    self.state.add_message(SystemMessage(content=hint))
+
             # 跨轮次失败学习 + 自动写 reflections
             notes = self.agent.failure_learner.observe_turn(self._turn_failures)
             for note in notes:
