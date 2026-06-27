@@ -1,12 +1,8 @@
-"""Subagent dispatch tool - 让 Agent 调度任务给其他 Agent。"""
+"""Subagent dispatch tool — direct-call via run_once()."""
 from __future__ import annotations
 
-import asyncio
 import json
-import time
 from typing import TYPE_CHECKING
-
-from ..core.events import AgentEventSource, DispatchEvent, DispatchResultEvent
 
 if TYPE_CHECKING:
     from ..core.agent import AgentSession
@@ -36,7 +32,7 @@ def create_subagent_dispatch_tool(
 
     from ..tools.decorators import tool
 
-    # 捕获外部 context，避免被工具参数 shadow
+    # 捕获外部 context
     _ctx = context
 
     @tool(
@@ -48,13 +44,23 @@ def create_subagent_dispatch_tool(
         task: str,
         session: "AgentSession",
         context: str = "",
+        agent_type: str = "general",
     ) -> str:
-        """调度任务给子 Agent，返回 JSON 结果。"""
+        """调度任务给子 Agent，返回 JSON 结果。
+
+        agent_type: explore (read-only), plan (read-only+planning), general (all tools)
+        """
+        if agent_id not in dispatchable_ids:
+            return json.dumps(
+                {"error": f"Unknown agent_id: {agent_id}. Available: {dispatchable_ids}"},
+                ensure_ascii=False,
+            )
+
         # 加载目标 Agent
         agent_def = _ctx.agent_loader.load(agent_id)
         from ..core.agent import Agent
 
-        agent = Agent(
+        sub_agent = Agent(
             agent_def,
             _ctx.config,
             _ctx.tool_registry,
@@ -62,39 +68,31 @@ def create_subagent_dispatch_tool(
             prompt_builder=_ctx.prompt_builder,
             memory_manager=_ctx.memory_manager,
         )
-        agent_source = AgentEventSource(agent_id=current_agent_id)
-        agent_session = agent.new_session(source=agent_source)
-        session_id = agent_session.session_id
+        sub_session = sub_agent.new_session()
 
         user_message = f"{task}\n\nContext:\n{context}" if context else task
 
-        loop = asyncio.get_running_loop()
-        result_future: asyncio.Future[str] = loop.create_future()
+        # Validate agent_type
+        valid_types = ("explore", "plan", "general")
+        if agent_type not in valid_types:
+            agent_type = "general"
 
-        async def handle_result(event: DispatchResultEvent) -> None:
-            if event.session_id == session_id:
-                if not result_future.done():
-                    if event.error:
-                        result_future.set_exception(Exception(event.error))
-                    else:
-                        result_future.set_result(event.content)
+        result = await sub_session.run_once(
+            user_message,
+            agent_type=agent_type,
+        )
 
-        _ctx.eventbus.subscribe(DispatchResultEvent, handle_result)
+        # Aggregate tokens into parent session's usage
+        if hasattr(session, '_subagent_tokens'):
+            session._subagent_tokens += result.input_tokens + result.output_tokens
+        else:
+            session._subagent_tokens = result.input_tokens + result.output_tokens
 
-        try:
-            dispatch_event = DispatchEvent(
-                session_id=session_id,
-                source=agent_source,
-                content=user_message,
-                timestamp=time.time(),
-                parent_session_id=session.session_id,
-            )
-            await _ctx.eventbus.publish(dispatch_event)
-
-            response = await asyncio.wait_for(result_future, timeout=120.0)
-        finally:
-            _ctx.eventbus.unsubscribe(handle_result)
-
-        return json.dumps({"result": response, "session_id": session_id}, ensure_ascii=False)
+        return json.dumps({
+            "result": result.text,
+            "session_id": result.session_id,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+        }, ensure_ascii=False)
 
     return subagent_dispatch

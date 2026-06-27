@@ -128,6 +128,14 @@ class Agent:
         return AgentSession(agent=self, state=state)
 
 @dataclass
+class AgentResult:
+    """Structured result from run_once()."""
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    session_id: str = ""
+
+@dataclass
 class AgentSession:
 
     agent: Agent
@@ -427,3 +435,80 @@ class AgentSession:
             tool_call_id=tc["id"],
             name=name,
         ))
+
+    async def run_once(
+        self,
+        prompt: str,
+        *,
+        max_iterations: int = 20,
+        agent_type: str | None = None,
+    ) -> "AgentResult":
+        """Direct-call mode for sub-agents. Returns AgentResult with text + token stats.
+
+        Unlike chat(), this:
+        - Skips history persistence (ephemeral session)
+        - Uses filtered tool registry if agent_type is specified
+        - Returns structured result instead of plain string
+        """
+        from .turn_context import build_turn_context
+        from .message_sanitizer import repair_tool_call_args
+
+        # Swap tool registry if agent_type specified
+        original_registry = self.agent.tool_registry
+        if agent_type:
+            from .agent_types import filter_tools_for_type
+            self.agent.tool_registry = filter_tools_for_type(original_registry, agent_type)
+
+        try:
+            ctx = await build_turn_context(self, prompt)
+            total_input_tokens = 0
+            total_output_tokens = 0
+            final_content = ""
+
+            for _iteration in range(max_iterations):
+                self.state = await self.agent.context_guard.check_and_compact(self.state)
+                context_window = self.agent.agent_def.llm.get("context_window")
+                messages = self.state.build_messages(max_context_tokens=context_window)
+                schemas = self.agent.tool_registry.get_schemas(active_only=True)
+
+                response = await self._call_llm_with_retry(
+                    messages, schemas, self.state.pending_reasoning_content,
+                )
+
+                # Accumulate tokens
+                usage = response.get("usage", {})
+                total_input_tokens += usage.get("prompt_tokens", 0)
+                total_output_tokens += usage.get("completion_tokens", 0)
+
+                reasoning = response.get("reasoning_content")
+                should_store = response.get("should_store_reasoning", False)
+                finish_reason = response.get("finish_reason", "stop")
+
+                if finish_reason == "tool_calls" and response["tool_calls"]:
+                    assistant_with_tools = AssistantMessage(content="")
+                    assistant_with_tools.tool_calls = repair_tool_call_args(response["tool_calls"])
+                    if reasoning:
+                        assistant_with_tools.reasoning_content = reasoning
+                    self.state.add_message(assistant_with_tools)
+                    self.state.pending_reasoning_content = reasoning if should_store else None
+                    await self._execute_tool_calls(response["tool_calls"])
+                    continue
+
+                content = response.get("content") or ""
+                if finish_reason == "length":
+                    content += "\n\n[响应因达到最大 token 限制而被截断]"
+
+                assistant_msg = AssistantMessage(content=content)
+                self.state.add_message(assistant_msg)
+                final_content = content
+                break
+
+            return AgentResult(
+                text=final_content,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                session_id=self.session_id,
+            )
+        finally:
+            # Always restore original registry
+            self.agent.tool_registry = original_registry
