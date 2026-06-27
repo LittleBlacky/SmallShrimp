@@ -2,7 +2,16 @@ from __future__ import annotations
 """工具基类。"""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
+
+
+class ToolPermission(str, Enum):
+    """三级工具权限。"""
+    SAFE = "safe"        # 只读，立即执行
+    CONFIRM = "confirm"  # 有副作用，需用户确认
+    DENY = "deny"        # 禁止，注册时丢弃
+
 
 @dataclass
 class ToolResult:
@@ -11,8 +20,15 @@ class ToolResult:
     content: str
     error: str | None = None
 
+
 class Tool(ABC):
     """工具基类，包含基础校验。"""
+
+    # ── 子类可覆盖的元数据 ────────────────────────────────
+    permission: ToolPermission = ToolPermission.SAFE
+    deferred: bool = False       # True = 不默认发送 schema，需 tool_search 激活
+    is_destructive: bool = False  # True = 不可逆操作
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -26,6 +42,14 @@ class Tool(ABC):
     @abstractmethod
     async def execute(self, **kwargs: Any) -> ToolResult:
         ...
+
+    def is_action_read_only(self, arguments: dict[str, Any]) -> bool:
+        """参数级权限判定。子类可覆盖以实现单工具内读写分离。
+
+        例如 cron_manage(action='list') 为只读，cron_manage(action='create') 为写操作。
+        默认：SAFE 权限的工具视为只读。
+        """
+        return self.permission == ToolPermission.SAFE
 
     def get_schema(self) -> dict:
         """获取工具的 JSON Schema。"""

@@ -172,7 +172,7 @@ class AgentSession:
 
             context_window = self.agent.agent_def.llm.get("context_window")
             messages = self.state.build_messages(max_context_tokens=context_window)
-            schemas = self.agent.tool_registry.get_schemas()
+            schemas = self.agent.tool_registry.get_schemas(active_only=True)
 
             # Phase 1.2: 带重试的 LLM 调用
             response = await self._call_llm_with_retry(
@@ -289,11 +289,11 @@ class AgentSession:
         return False
 
     async def _execute_tool_calls(self, tool_calls: list) -> None:
-        """并行执行只读工具，串行执行写工具。含 guardrail 检测。"""
+        """并行执行只读工具，串行执行写工具。含 guardrail 和三级权限检测。"""
         import asyncio
-        from ..core.tool_guardrails import append_guardrail_warning
+        from ..core.tool_guardrails import append_guardrail_warning, guardrail_synthetic_result, is_idempotent
+        from ..tools.base import ToolPermission
 
-        READONLY_TOOLS = {"read", "glob", "grep", "websearch", "webread", "skill"}
         reads: list[tuple] = []
         writes: list[tuple] = []
 
@@ -301,7 +301,21 @@ class AgentSession:
             name = tc["function"]["name"]
             args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
             entry = (tc, name, args)
-            if name in READONLY_TOOLS:
+
+            # before_call 护栏预检
+            decision = self._guardrail.before_call(name, args)
+            if decision.is_block or decision.is_halt:
+                self._check_guardrail_and_add(name, args, guardrail_synthetic_result(decision), False, tc)
+                continue
+
+            # 判断是否只读：优先使用工具自身的 is_action_read_only
+            tool = self.agent.tool_registry.get(name)
+            if tool and hasattr(tool, 'is_action_read_only'):
+                read_only = tool.is_action_read_only(args)
+            else:
+                read_only = is_idempotent(name)
+
+            if read_only:
                 reads.append(entry)
             else:
                 writes.append(entry)
@@ -320,7 +334,25 @@ class AgentSession:
 
         # 串行执行写工具
         for tc, name, args in writes:
-            # 权限检查
+            # 三级权限检查
+            tool = self.agent.tool_registry.get(name)
+            tool_perm = tool.permission if tool else ToolPermission.SAFE
+
+            if tool_perm == ToolPermission.CONFIRM:
+                # 需要确认的工具
+                confirm_fn = getattr(self, '_confirm_fn', None)
+                if confirm_fn:
+                    approved = confirm_fn(f"确认执行 {name}？")
+                    if approved is False:
+                        self.state.add_message(ToolMessage(
+                            content=f"Error: {name} denied by user.",
+                            tool_call_id=tc["id"],
+                            name=name,
+                        ))
+                        continue
+                # 无确认回调 → 默认允许（非交互模式）
+
+            # 旧权限系统兼容（PermissionChecker）
             perm = self.agent.permission_checker.check(name, args)
             if perm.needs_confirmation:
                 confirm_fn = getattr(self, '_confirm_fn', None)
@@ -336,7 +368,6 @@ class AgentSession:
                     if approved is True:
                         path = args.get("path", args.get("file_path", ""))
                         self.agent.permission_checker.confirm_path(path)
-                # 无确认回调 → 默认允许（非交互模式）
             elif perm.is_denied:
                 self.state.add_message(ToolMessage(
                     content=f"Error: {perm.message}",
@@ -360,14 +391,16 @@ class AgentSession:
         self, name: str, args: dict, result: str, failed: bool, tc: dict
     ) -> None:
         """Guardrail 检查 + 添加 ToolMessage。"""
-        from ..core.tool_guardrails import append_guardrail_warning
+        from ..core.tool_guardrails import append_guardrail_warning, is_idempotent
 
-        is_read_only = name in {"read", "glob", "grep", "websearch", "webread", "skill"}
+        read_only = is_idempotent(name)
         decision = self._guardrail.after_call(
-            name, args, result, failed=failed, is_read_only=is_read_only,
+            name, args, result, failed=failed, is_read_only=read_only,
         )
 
         if decision.is_warning:
+            result = append_guardrail_warning(result, decision)
+        elif decision.is_halt:
             result = append_guardrail_warning(result, decision)
 
         # 记录失败用于跨轮次学习

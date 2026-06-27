@@ -33,6 +33,12 @@ def create_tool_registry(config: dict) -> ToolRegistry:
     from .cron_tool import create_cron_tool
     registry.register(create_cron_tool())
 
+    # tool_search（延迟加载工具发现）
+    from .tool_search_tool import ToolSearchTool
+    tool_search = ToolSearchTool(registry)
+    tool_search.deferred = False  # tool_search 自身始终可用
+    registry.register(tool_search)
+
     return registry
 
 

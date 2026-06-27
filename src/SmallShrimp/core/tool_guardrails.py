@@ -23,16 +23,26 @@ from typing import Any
 @dataclass(frozen=True)
 class GuardrailConfig:
     warnings_enabled: bool = True
+    hard_stop_enabled: bool = False          # explicit opt-in for block/halt
     exact_failure_warn_after: int = 2
+    exact_failure_block_after: int = 5
     same_tool_failure_warn_after: int = 3
+    same_tool_failure_halt_after: int = 8
     no_progress_warn_after: int = 2
+    no_progress_block_after: int = 5
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any] | None) -> "GuardrailConfig":
+        if not data:
+            return cls()
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
 # ── Decision ─────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class GuardrailDecision:
-    action: str = "allow"   # allow | warn
+    action: str = "allow"   # allow | warn | block | halt
     code: str = ""
     message: str = ""
     tool_name: str = ""
@@ -40,11 +50,31 @@ class GuardrailDecision:
 
     @property
     def allows_execution(self) -> bool:
-        return self.action == "allow"
+        return self.action in ("allow", "warn")
 
     @property
     def is_warning(self) -> bool:
         return self.action == "warn"
+
+    @property
+    def is_block(self) -> bool:
+        return self.action == "block"
+
+    @property
+    def is_halt(self) -> bool:
+        return self.action == "halt"
+
+
+# ── Tool Call Signature ──────────────────────────────────────
+
+@dataclass(frozen=True)
+class ToolCallSignature:
+    tool_name: str
+    args_hash: str   # SHA-256 of canonical JSON
+
+    @classmethod
+    def create(cls, tool_name: str, args: dict[str, Any] | None) -> "ToolCallSignature":
+        return cls(tool_name=tool_name, args_hash=_sha256(_canonical_args(args)))
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -65,9 +95,31 @@ def _signature(tool_name: str, args: dict[str, Any] | None) -> str:
     return f"{tool_name}:{_sha256(_canonical_args(args))}"
 
 
+# ── Tool Classification ─────────────────────────────────────
+
+IDEMPOTENT_TOOLS: frozenset[str] = frozenset({
+    "read", "glob", "grep", "websearch", "webread",
+    "skill", "recall_memory", "tool_search",
+    "mcp__",  # prefix match handled in is_idempotent()
+})
+
+MUTATING_TOOLS: frozenset[str] = frozenset({
+    "write", "shell", "remember_profile", "remember_fact",
+    "remember_project", "remember_reflection", "remember_constraint",
+    "consolidate_memories", "cron_set", "post_message",
+    "subagent_dispatch",
+})
+
+
+def is_idempotent(tool_name: str) -> bool:
+    if tool_name in IDEMPOTENT_TOOLS:
+        return True
+    return tool_name.startswith("mcp__")
+
+
 # ── Controller ───────────────────────────────────────────────
 
-class ToolGuardrailController:
+class ToolCallGuardrailController:
 
     def __init__(self, config: GuardrailConfig | None = None) -> None:
         self.config = config or GuardrailConfig()
@@ -78,6 +130,48 @@ class ToolGuardrailController:
         self._exact_failures: dict[str, int] = {}       # signature → count
         self._same_tool_failures: dict[str, int] = {}   # tool_name → count
         self._no_progress: dict[str, tuple[str, int]] = {}  # signature → (hash, count)
+
+    # ── before_call — pre-execution check ───────────────────
+
+    def before_call(
+        self,
+        tool_name: str,
+        args: dict[str, Any] | None,
+    ) -> GuardrailDecision:
+        """Check if this call should be blocked before execution."""
+        if not self.config.hard_stop_enabled:
+            return GuardrailDecision(tool_name=tool_name)
+
+        sig = _signature(tool_name, args)
+
+        # Block: same exact failure exceeded threshold
+        exact = self._exact_failures.get(sig, 0)
+        if exact >= self.config.exact_failure_block_after:
+            return GuardrailDecision(
+                action="block",
+                code="exact_failure_block",
+                message=(
+                    f"{tool_name} 已用相同参数失败 {exact} 次，已阻断。"
+                    f"请改变策略后重试。"
+                ),
+                tool_name=tool_name,
+                count=exact,
+            )
+
+        # Halt: same-tool failure exceeded threshold
+        same = self._same_tool_failures.get(tool_name, 0)
+        if same >= self.config.same_tool_failure_halt_after:
+            return GuardrailDecision(
+                action="halt",
+                code="same_tool_halt",
+                message=(
+                    f"{tool_name} 本轮已失败 {same} 次，已中止本轮。"
+                ),
+                tool_name=tool_name,
+                count=same,
+            )
+
+        return GuardrailDecision(tool_name=tool_name)
 
     # ── after_call — main hook ─────────────────────────────
 
@@ -118,6 +212,30 @@ class ToolGuardrailController:
 
         self._no_progress.pop(sig, None)
 
+        # Hard stop checks (when enabled)
+        if self.config.hard_stop_enabled:
+            if exact >= self.config.exact_failure_block_after:
+                return GuardrailDecision(
+                    action="block",
+                    code="exact_failure_block",
+                    message=(
+                        f"{tool_name} 已用相同参数失败 {exact} 次，已阻断。"
+                    ),
+                    tool_name=tool_name,
+                    count=exact,
+                )
+            if same >= self.config.same_tool_failure_halt_after:
+                return GuardrailDecision(
+                    action="halt",
+                    code="same_tool_halt",
+                    message=(
+                        f"{tool_name} 本轮已失败 {same} 次，已中止本轮。"
+                    ),
+                    tool_name=tool_name,
+                    count=same,
+                )
+
+        # Warning checks
         if self.config.warnings_enabled and exact >= self.config.exact_failure_warn_after:
             return GuardrailDecision(
                 action="warn",
@@ -154,6 +272,17 @@ class ToolGuardrailController:
             repeat = prev[1] + 1
         self._no_progress[sig] = (result_hash, repeat)
 
+        if self.config.hard_stop_enabled and repeat >= self.config.no_progress_block_after:
+            return GuardrailDecision(
+                action="block",
+                code="no_progress_block",
+                message=(
+                    f"{tool_name} 已返回相同结果 {repeat} 次，已阻断。"
+                ),
+                tool_name=tool_name,
+                count=repeat,
+            )
+
         if self.config.warnings_enabled and repeat >= self.config.no_progress_warn_after:
             return GuardrailDecision(
                 action="warn",
@@ -176,3 +305,8 @@ def append_guardrail_warning(result: str, decision: GuardrailDecision) -> str:
     if not decision.is_warning or not decision.message:
         return result
     return f"{result}\n\n[Tool Loop Warning: {decision.code}; {decision.message}]"
+
+
+def guardrail_synthetic_result(decision: GuardrailDecision) -> str:
+    """为被 block/halt 的工具调用生成合成结果。"""
+    return f"[Tool blocked: {decision.code}; {decision.message}]"
