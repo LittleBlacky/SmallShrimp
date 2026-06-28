@@ -20,12 +20,14 @@ class Entity:
     description: str = ""
     aliases: list[str] = field(default_factory=list)
     importance: float = 1.0
+    access_count: float = 0.0
     created_at: float = 0.0
 
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "type": self.type,
             "description": self.description, "aliases": self.aliases,
+            "importance": self.importance, "access_count": self.access_count,
             "importance": self.importance,
         }
 
@@ -83,6 +85,7 @@ class GraphStore:
                 description TEXT DEFAULT '',
                 aliases TEXT DEFAULT '[]',
                 importance REAL DEFAULT 1.0,
+                access_count REAL DEFAULT 0.0,
                 created_at REAL NOT NULL
             );
 
@@ -140,6 +143,27 @@ class GraphStore:
             self._conn.close()
         self._conn = None
 
+    @staticmethod
+    def _row_to_entity(row) -> Entity:
+        """Convert a SQLite Row to Entity."""
+        return Entity(
+            id=row["id"], name=row["name"], type=row["type"],
+            description=row["description"],
+            aliases=json.loads(row["aliases"]) if row["aliases"] else [],
+            importance=row["importance"],
+            access_count=row["access_count"] if "access_count" in row.keys() else 0.0,
+            created_at=row["created_at"],
+        )
+
+    def bump_access(self, name: str, amount: float = 1.0) -> None:
+        """Increment access_count for an entity."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE entities SET access_count = access_count + ? WHERE name = ?",
+            (amount, name),
+        )
+        conn.commit()
+
     # ── Entity CRUD ──────────────────────────────────────
 
     def upsert_entity(
@@ -186,12 +210,7 @@ class GraphStore:
         ).fetchone()
         if not row:
             return None
-        return Entity(
-            id=row["id"], name=row["name"], type=row["type"],
-            description=row["description"],
-            aliases=json.loads(row["aliases"]) if row["aliases"] else [],
-            importance=row["importance"], created_at=row["created_at"],
-        )
+        return self._row_to_entity(row)
 
     def get_entity_by_id(self, entity_id: int) -> Entity | None:
         conn = self._get_conn()
@@ -200,12 +219,7 @@ class GraphStore:
         ).fetchone()
         if not row:
             return None
-        return Entity(
-            id=row["id"], name=row["name"], type=row["type"],
-            description=row["description"],
-            aliases=json.loads(row["aliases"]) if row["aliases"] else [],
-            importance=row["importance"], created_at=row["created_at"],
-        )
+        return self._row_to_entity(row)
 
     def search_entities(self, query: str, limit: int = 10) -> list[Entity]:
         """FTS5 search on entities."""
@@ -228,15 +242,7 @@ class GraphStore:
                 LIMIT ?
             """, (like, like, limit)).fetchall()
 
-        return [
-            Entity(
-                id=r["id"], name=r["name"], type=r["type"],
-                description=r["description"],
-                aliases=json.loads(r["aliases"]) if r["aliases"] else [],
-                importance=r["importance"], created_at=r["created_at"],
-            )
-            for r in rows
-        ]
+        return [self._row_to_entity(r) for r in rows]
 
     # ── Relation CRUD ────────────────────────────────────
 
@@ -305,6 +311,7 @@ class GraphStore:
                             type=r["target_type"], description=r["target_desc"],
                             aliases=json.loads(r["target_aliases"]) if r["target_aliases"] else [],
                             importance=r["target_imp"],
+                            access_count=r.get("target_access", 0.0),
                         ))
 
                 # Incoming
@@ -329,6 +336,7 @@ class GraphStore:
                             type=r["source_type"], description=r["source_desc"],
                             aliases=json.loads(r["source_aliases"]) if r["source_aliases"] else [],
                             importance=r["source_imp"],
+                            access_count=r.get("source_access", 0.0),
                         ))
 
             frontier = next_frontier
@@ -340,15 +348,7 @@ class GraphStore:
         rows = conn.execute(
             "SELECT * FROM entities ORDER BY importance DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [
-            Entity(
-                id=r["id"], name=r["name"], type=r["type"],
-                description=r["description"],
-                aliases=json.loads(r["aliases"]) if r["aliases"] else [],
-                importance=r["importance"], created_at=r["created_at"],
-            )
-            for r in rows
-        ]
+        return [self._row_to_entity(r) for r in rows]
 
     def get_entity_count(self) -> int:
         conn = self._get_conn()

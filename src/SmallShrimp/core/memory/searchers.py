@@ -83,6 +83,10 @@ class GraphSearcher:
         if not entities:
             return []
 
+        # Bump access_count for hit entities
+        for entity in entities:
+            self._graph.bump_access(entity.name)
+
         entries = []
         for i, entity in enumerate(entities):
             # Base score from search rank (inverse rank)

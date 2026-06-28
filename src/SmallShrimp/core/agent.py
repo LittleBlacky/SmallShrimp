@@ -267,6 +267,9 @@ class AgentSession:
                     except Exception:
                         pass
 
+            # 隐含信息自动提取（不需要用户说"记住"）
+            await self._extract_implicit_memories(original_text, content)
+
             if self.agent.history_manager:
                 self.agent.history_manager.save(self.session_id, self.state.messages)
 
@@ -318,6 +321,68 @@ class AgentSession:
             if isinstance(m, AssistantMessage) and m.tool_calls:
                 return True
         return False
+
+    async def _extract_implicit_memories(
+        self, user_message: str, assistant_response: str,
+    ) -> None:
+        """从对话中自动提取值得记住的信息（不需要用户说"记住"）。
+
+        提取偏好、事实、环境信息，最多 3 条/轮。
+        """
+        if not self.agent.memory_manager:
+            return
+
+        prompt = (
+            "从以下对话中提取值得长期记住的信息。只提取用户明确表达的偏好、"
+            "事实或环境信息，不提取临时任务状态。\n\n"
+            f"用户: {user_message[:500]}\n"
+            f"助手: {assistant_response[:500]}\n\n"
+            "输出格式：每行一条，格式为 [类型] 内容。类型为 偏好/事实/环境。\n"
+            "如果没有值得记住的信息，输出'无'。\n"
+            "示例:\n"
+            "[偏好] 用户习惯用 VS Code 编辑文件\n"
+            "[事实] 用户的服务器 IP 是 192.168.1.100\n"
+            "[环境] 用户的 Python 环境在 G:\\Anaconda"
+        )
+
+        try:
+            response = await self.agent.llm.chat([
+                {"role": "user", "content": prompt}
+            ])
+            raw = response.get("content", "").strip()
+        except Exception:
+            return
+
+        if not raw or raw == "无" or len(raw) < 5:
+            return
+
+        # Parse and store (max 3 per turn)
+        import re
+        pattern = re.compile(r'\[(偏好|事实|环境)\]\s*(.+)')
+        count = 0
+        for line in raw.split("\n"):
+            if count >= 3:
+                break
+            match = pattern.search(line.strip())
+            if not match:
+                continue
+
+            category, content = match.group(1), match.group(2).strip()
+            if not content or len(content) < 3:
+                continue
+
+            layer_map = {"偏好": "reflections", "事实": "facts", "环境": "facts"}
+            layer = layer_map.get(category, "reflections")
+            importance = 6 if category == "偏好" else 5
+
+            try:
+                result = self.agent.memory_manager.store(
+                    layer, content, importance=importance, source="implicit_extraction",
+                )
+                if result.get("action") in ("write", "staged"):
+                    count += 1
+            except Exception:
+                pass
 
     async def _execute_tool_calls(self, tool_calls: list) -> None:
         """并行执行只读工具，串行执行写工具。含 guardrail 和三级权限检测。"""

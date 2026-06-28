@@ -79,8 +79,9 @@ class MemoryManager:
 
         # WritePipeline: Graph indexing (LLM caller injected later)
         if self._provider._graph_store:
+            embedding = getattr(self._provider._store, '_embedding_provider', None)
             self._write_pipeline = WritePipeline(
-                indexers=[GraphIndexer(self._provider._graph_store)]
+                indexers=[GraphIndexer(self._provider._graph_store, embedding_provider=embedding)]
             )
 
     def set_llm_caller(self, llm_caller) -> None:
@@ -88,9 +89,11 @@ class MemoryManager:
         if self._write_pipeline:
             from .indexers import GraphIndexer
             graph = self._provider._graph_store if hasattr(self._provider, '_graph_store') else None
+            embedding = getattr(self._provider, '_store', None)
+            embedding = getattr(embedding, '_embedding_provider', None) if embedding else None
             if graph:
                 self._write_pipeline = WritePipeline(
-                    indexers=[GraphIndexer(graph, llm_caller=llm_caller)]
+                    indexers=[GraphIndexer(graph, llm_caller=llm_caller, embedding_provider=embedding)]
                 )
 
     @property
