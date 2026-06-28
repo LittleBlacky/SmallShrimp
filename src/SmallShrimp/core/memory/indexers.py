@@ -45,11 +45,7 @@ class GraphIndexer:
         if not content or not content.strip():
             return
 
-        # Step 1: Wikilink resolution (always, no LLM needed)
-        from .wikilinks import inject_wikilink_relations
-        inject_wikilink_relations(content, entity_name=record_id or layer, graph=self._graph)
-
-        # Step 2: Triplet extraction (requires LLM)
+        # Triplet extraction (requires LLM)
         if self._llm is not None:
             await self._extract_and_store(content)
 
