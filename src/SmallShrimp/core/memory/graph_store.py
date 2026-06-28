@@ -21,6 +21,7 @@ class Entity:
     aliases: list[str] = field(default_factory=list)
     importance: float = 1.0
     access_count: float = 0.0
+    community_id: str = ""
     created_at: float = 0.0
 
     def to_dict(self) -> dict:
@@ -28,7 +29,7 @@ class Entity:
             "id": self.id, "name": self.name, "type": self.type,
             "description": self.description, "aliases": self.aliases,
             "importance": self.importance, "access_count": self.access_count,
-            "importance": self.importance,
+            "community_id": self.community_id,
         }
 
 
@@ -86,6 +87,7 @@ class GraphStore:
                 aliases TEXT DEFAULT '[]',
                 importance REAL DEFAULT 1.0,
                 access_count REAL DEFAULT 0.0,
+                community_id TEXT DEFAULT '',
                 created_at REAL NOT NULL
             );
 
@@ -152,6 +154,7 @@ class GraphStore:
             aliases=json.loads(row["aliases"]) if row["aliases"] else [],
             importance=row["importance"],
             access_count=row["access_count"] if "access_count" in row.keys() else 0.0,
+            community_id=row["community_id"] if "community_id" in row.keys() else "",
             created_at=row["created_at"],
         )
 
@@ -163,6 +166,90 @@ class GraphStore:
             (amount, name),
         )
         conn.commit()
+
+    def assign_community(self, name: str) -> str:
+        """Assign entity to a community via neighbor voting.
+
+        Looks at 1-hop neighbors, picks the community with most votes.
+        If no neighbors have communities, creates a new one from the entity name.
+        Returns the assigned community_id.
+        """
+        conn = self._get_conn()
+        entity = self.get_entity(name)
+        if not entity:
+            return ""
+
+        # If already assigned, skip
+        if entity.community_id:
+            return entity.community_id
+
+        # Find neighbors' community_ids
+        neighbor_communities: dict[str, float] = {}  # community_id → weighted vote
+
+        # Outgoing neighbors
+        rows = conn.execute("""
+            SELECT e.community_id, e.access_count
+            FROM relations r JOIN entities e ON e.id = r.target_id
+            WHERE r.source_id = ?
+        """, (entity.id,)).fetchall()
+
+        # Incoming neighbors
+        rows += conn.execute("""
+            SELECT e.community_id, e.access_count
+            FROM relations r JOIN entities e ON e.id = r.source_id
+            WHERE r.target_id = ?
+        """, (entity.id,)).fetchall()
+
+        for r in rows:
+            cid = r["community_id"]
+            if cid:
+                # Weight by access_count (more accessed = stronger vote)
+                weight = 1.0 + (r["access_count"] or 0.0) * 0.1
+                neighbor_communities[cid] = neighbor_communities.get(cid, 0.0) + weight
+
+        if neighbor_communities:
+            # Pick community with highest weighted vote
+            best = max(neighbor_communities, key=neighbor_communities.get)
+            conn.execute(
+                "UPDATE entities SET community_id = ? WHERE id = ?",
+                (best, entity.id),
+            )
+            conn.commit()
+            return best
+
+        # No neighbors with communities — create new community
+        # Use a sanitized version of the entity name as community_id
+        community_id = f"comm_{name.lower().replace(' ', '_')}"
+        conn.execute(
+            "UPDATE entities SET community_id = ? WHERE id = ?",
+            (community_id, entity.id),
+        )
+        conn.commit()
+        return community_id
+
+    def get_community(self, community_id: str) -> list[Entity]:
+        """Get all entities in a community."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM entities WHERE community_id = ? ORDER BY access_count DESC",
+            (community_id,),
+        ).fetchall()
+        return [self._row_to_entity(r) for r in rows]
+
+    def list_communities(self) -> list[dict]:
+        """List all communities with entity counts."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT community_id, COUNT(*) as count, SUM(access_count) as total_access
+            FROM entities
+            WHERE community_id != ''
+            GROUP BY community_id
+            ORDER BY total_access DESC
+        """).fetchall()
+        return [
+            {"community_id": r["community_id"], "count": r["count"], "total_access": r["total_access"]}
+            for r in rows
+        ]
 
     # ── Entity CRUD ──────────────────────────────────────
 

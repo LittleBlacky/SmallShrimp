@@ -69,6 +69,9 @@ class GraphIndexer:
                 subject, triplet.predicate, obj,
                 source_text=triplet.source_text or content[:200],
             )
+            # Incremental community assignment (after relation is created)
+            self._graph.assign_community(subject)
+            self._graph.assign_community(obj)
 
     def _resolve_or_create(self, name: str, entity_type: str, context: str) -> str:
         """Find existing entity or create new one. Returns the canonical name.
