@@ -24,6 +24,7 @@ SmallShrimp 不是通用 agent 框架，而是围绕用户电脑、文件、工�
 - **一个核心循环，多层 harness 挂载**：agent loop 是稳定核心；hooks、skills、memory、permissions、tools、compaction、tasks、subagents、cron、channels 都应该挂在它周围。
 - **个人助理优先**：抽象必须服务于用户的电脑、文件、工作模式和偏好，不为通用 agent 框架 API 做优化。
 - **用户可控**：自动学习、技能创建、记忆提取和自治行为必须可观察、可审查、可关闭。
+- **Human-in-loop 是核心机制**：涉及用户授权、偏好确认、关键决策、长期记忆写入、技能激活和自治升级时，runtime 必须能把控制权交还给用户。
 - **小步可回退**：每个实现步骤都要小到可以先讨论、独立测试、单独提交。
 - **方法沉淀为资产**：重复成功的工作流应该沉淀为版本化 skills、memories 或 task templates。
 - **先 runtime，后自治**：hooks、memory、skills、task graph、permissions、observability 稳定之前，不做激进自治行为。
@@ -48,6 +49,7 @@ endpoint input
   -> 如果存在 tool calls:
        -> tool 调用前 hooks
        -> permission 和 guardrail 检查
+       -> 必要时进入 human-in-loop 审批/确认
        -> tool dispatch / MCP dispatch / background dispatch
        -> tool 调用后 hooks
        -> 追加 tool results
@@ -57,6 +59,7 @@ endpoint input
        -> 把响应交付给 endpoint
        -> response 后 hooks
        -> stop/task completion hooks
+       -> 必要时请求用户确认 memory/skill/task 学习结果
        -> 后台学习和 consolidation
 ```
 
@@ -177,7 +180,44 @@ Compaction 应该是 runtime service，而不是隐藏在某个 channel 里的�
 
 Permission 决策应该能在 runtime traces 里看到。
 
-### 8. Task Graph 层
+### 8. Human-in-loop 层
+
+负责在关键节点把控制权交还给用户。
+
+Human-in-loop 不是简单的“弹确认框”，而是 SmallShrimp 从辅助工具走向持续进化个人助理时的安全阀和校准机制。
+
+典型触发场景：
+
+- 高风险 tool 调用，例如删除、覆盖、批量移动、联网发送、外部系统写入
+- 权限边界不明确，需要用户确认是否允许
+- agent 准备写入长期 memory
+- agent 准备创建、更新或激活 skill
+- agent 准备把失败复盘转成方法论
+- agent 准备派生 subagent 或启动 autonomous worker
+- agent 对用户偏好、画像、任务目标存在不确定性
+- agent 完成任务后需要用户评价结果质量
+
+第一版 Human-in-loop 应该保守：
+
+- 默认阻塞当前高风险动作，等待用户确认
+- 支持 approve / reject / revise 三类结果
+- 记录用户决定和原因
+- 把用户反馈交给 memory、skill learning 或 task review，但不直接静默生效
+- 支持不同 endpoint 的交互形态，CLI 可以 prompt，桌面端可以弹窗，IM 端可以按钮或文本回复
+
+Human-in-loop 与 permission 的关系：
+
+- permission 判断“是否需要授权、是否允许执行”
+- human-in-loop 承接“如何向用户请求授权、如何解释风险、如何记录结果”
+- permissions 不应该直接承担用户交互 UI
+
+Human-in-loop 与 learning 的关系：
+
+- memory/skill/task 的自动沉淀默认应先进入 draft
+- 用户确认后再激活或写入长期状态
+- 用户拒绝或修改也是重要反馈，应进入 feedback memory
+
+### 9. Task Graph 层
 
 负责持久化工作协调。
 
@@ -209,7 +249,7 @@ Task graph：
 - `updated_at`
 - `source_session_id`
 
-### 9. Fork 与 Subagent 层
+### 10. Fork 与 Subagent 层
 
 负责干净的上下文委派。
 
@@ -230,7 +270,7 @@ Fork 是通用基础设施。Skill creation 只是 fork 的一个使用场景。
 - parallel file inspection
 - autonomous task execution
 
-### 10. Learning 与 Evolution 层
+### 11. Learning 与 Evolution 层
 
 负责让 SmallShrimp 随时间改进。
 
@@ -254,7 +294,7 @@ Fork 是通用基础设施。Skill creation 只是 fork 的一个使用场景。
 
 这一层必须保持可审查。早期版本应该生成 drafts 和 suggestions，不能静默改写助理行为。
 
-### 11. Observability 层
+### 12. Observability 层
 
 负责解释发生了什么。
 
@@ -270,6 +310,7 @@ Runtime traces 后续应该能回答：
 - 是否发生 compaction
 - 是否调度了 learning tasks
 - 是否创建了 fork/subagents
+- 是否进入 human-in-loop，以及用户做了什么决定
 
 没有 observability，自治学习就很难被信任。
 
@@ -311,6 +352,11 @@ Runtime traces 后续应该能回答：
 - `compact.after`
 - `permission.request`
 - `permission.denied`
+- `human.approval.requested`
+- `human.approval.granted`
+- `human.approval.rejected`
+- `human.revision.requested`
+- `human.feedback.received`
 - `tool.failed`
 - `config.changed`
 - `file.changed`
@@ -376,6 +422,26 @@ hooks:
 - draft memory records
 - mocked extraction 的确定性测试
 - 不做静默不可逆的 memory rewrite
+
+## Human-in-loop 方向
+
+Human-in-loop 是长期个人助理的校准层，必须贯穿权限、学习、技能、记忆、任务和自治。
+
+第一阶段目标：
+
+- 定义统一的 approval request 数据结构
+- 定义 approve / reject / revise 响应语义
+- 支持 CLI 端最小确认流程
+- 在 runtime trace 中记录确认请求和用户响应
+- 先服务高风险 tool call 和长期状态写入，不做复杂 UI
+
+长期目标：
+
+- 多端统一审批体验
+- 用户可设置默认策略，例如“低风险自动执行，高风险询问”
+- 用户反馈进入 feedback memory
+- 用户修改过的 skill/memory draft 形成版本记录
+- 对频繁重复批准的低风险动作，agent 可以建议升级默认策略，但必须由用户确认
 
 ## Task 与 Autonomy 方向
 
@@ -448,7 +514,19 @@ hooks:
 
 这一阶段为 autonomous agents 做准备，但不要求实现自治。
 
-### Phase 6：Forked Workflows
+### Phase 6：Human-in-loop 基础
+
+交付物：
+
+- approval request/response 数据结构
+- CLI 最小确认流程
+- permission request 与 human-in-loop 的边界打通
+- memory/skill draft 激活前的确认入口
+- trace 中记录用户决定
+
+这一阶段不做复杂多端 UI，只先打通 runtime 语义。
+
+### Phase 7：Forked Workflows
 
 交付物：
 
@@ -457,7 +535,7 @@ hooks:
 - skill drafting 和 memory extraction 的 fork 使用场景
 - parent 与 child session 的 trace linkage
 
-### Phase 7：Controlled Autonomy
+### Phase 8：Controlled Autonomy
 
 交付物：
 
@@ -467,7 +545,7 @@ hooks:
 - 用户可见 progress summaries
 - shutdown 和 failure recovery policy
 
-### Phase 8：用户提升反馈
+### Phase 9：用户提升反馈
 
 交付物：
 
@@ -505,6 +583,8 @@ hooks:
 3. 第一版实现里，skill catalog attachment 应该在 memory prefetch 之前还是之后？
 4. 自动 memory extraction 是否默认只创建 inactive drafts？
 5. Task graph 存储应该放在 `workspace/tasks/`，还是沿用现有 runtime workspace 结构？
+6. Human-in-loop 第一版是否只支持 CLI 确认，还是同时定义桌面端/IM 端协议？
+7. approve / reject / revise 的用户反馈是否默认写入 feedback memory draft？
 
 ## 后续每批工作的验收标准
 
