@@ -2,8 +2,8 @@ from __future__ import annotations
 """Skill 加载器测试。"""
 import tempfile
 from pathlib import Path
-from src.SmallShrimp.core.skill_loader import SkillLoader
-from src.SmallShrimp.core.skill_def import SkillDef
+from src.SmallShrimp.core.definitions.skill_loader import SkillLoader
+from src.SmallShrimp.core.definitions.skill_def import SkillDef
 
 
 def create_skill_dir(parent: Path, name: str, content: str) -> Path:
@@ -126,6 +126,98 @@ description: Valid
 
         assert len(skills) == 1
         assert skills[0].id == "valid-skill"
+
+
+def test_skill_loader_discovers_standard_skill_without_id_or_triggers():
+    """标准 skill 只需要 name 和 description。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skills_dir = Path(tmpdir)
+        create_skill_dir(skills_dir, "code-review", """---
+name: Code Review
+description: Review local code changes.
+---
+
+# Code Review
+""")
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.discover_skills()
+
+        assert len(skills) == 1
+        assert skills[0].id == "code-review"
+        assert skills[0].name == "Code Review"
+        assert skills[0].description == "Review local code changes."
+
+
+def test_skill_loader_loads_version_content_from_frontmatter_version():
+    """存在 versions/<version>/SKILL.md 时，加载指定版本正文。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skills_dir = Path(tmpdir)
+        skill_dir = create_skill_dir(skills_dir, "coding-review", """---
+name: Code Review
+description: Review local code changes.
+version: 1.1.0
+---
+
+# Stale Entrypoint
+""")
+        version_dir = skill_dir / "versions" / "1.1.0"
+        version_dir.mkdir(parents=True)
+        (version_dir / "SKILL.md").write_text("# Active Version\n\nUse this version.", encoding="utf-8")
+
+        loader = SkillLoader(skills_dir)
+        skill = loader.load("coding-review")
+
+        assert skill.id == "coding-review"
+        assert skill.version == "1.1.0"
+        assert "Active Version" in skill.content
+        assert "Stale Entrypoint" not in skill.content
+
+
+def test_skill_loader_excludes_archived_skills_by_default():
+    """archived skill 不应进入默认自动发现结果。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skills_dir = Path(tmpdir)
+        create_skill_dir(skills_dir, "active-skill", """---
+name: Active Skill
+description: Active.
+status: active
+---
+
+# Active
+""")
+        create_skill_dir(skills_dir, "archived-skill", """---
+name: Archived Skill
+description: Archived.
+status: archived
+---
+
+# Archived
+""")
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.discover_skills()
+
+        assert [skill.id for skill in skills] == ["active-skill"]
+
+
+def test_skill_loader_can_include_archived_skills():
+    """显式请求时可以发现 archived skill。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skills_dir = Path(tmpdir)
+        create_skill_dir(skills_dir, "archived-skill", """---
+name: Archived Skill
+description: Archived.
+status: archived
+---
+
+# Archived
+""")
+
+        loader = SkillLoader(skills_dir)
+        skills = loader.discover_skills(include_archived=True)
+
+        assert [skill.id for skill in skills] == ["archived-skill"]
 
 
 if __name__ == "__main__":
