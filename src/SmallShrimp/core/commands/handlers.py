@@ -74,7 +74,7 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
 
 
 def _skill_create(skill_name: str, description: str) -> str:
-    """Create a standard Markdown-first skill draft."""
+    """Create a standard Markdown-first skill draft using skill-creator guidance."""
     skill_id = skill_name.strip()
     description = description.strip()
     if not skill_id or not description:
@@ -85,6 +85,7 @@ def _skill_create(skill_name: str, description: str) -> str:
     if skill_file.exists():
         return f"技能 `{skill_id}` 已存在: {skill_file}"
 
+    creator_available = _skill_creator_available()
     skill_dir.mkdir(parents=True, exist_ok=False)
     skill_file.write_text(
         f"""---
@@ -107,8 +108,21 @@ Use this skill when the task matches this description:
 3. Follow the user's preferred format and constraints.
 4. Verify the output before reporting completion.
 
+## Test Prompts
+
+- Ask SmallShrimp to handle a concrete task that should trigger this skill.
+- Ask a neighboring task that should not trigger this skill.
+- Ask an underspecified version of the task and check whether SmallShrimp asks only necessary clarifying questions.
+
+## Iteration Notes
+
+- Improve `description` if this skill does not trigger in the right situations.
+- Move repeated deterministic operations into `scripts/`.
+- Move long reference material into `references/`.
+
 ## Notes
 
+- Created with guidance from `skill-creator`.
 - Keep this skill concise.
 - Move long references into `references/`.
 - Move deterministic helper code into `scripts/`.
@@ -116,7 +130,16 @@ Use this skill when the task matches this description:
         encoding="utf-8",
     )
 
-    return f"✓ 已创建技能草稿 `{skill_id}`: {skill_file}"
+    source = "基于 `skill-creator`" if creator_available else "使用内置 skill-creator 模板"
+    return f"✓ 已创建技能草稿 `{skill_id}` ({source}): {skill_file}"
+
+
+def _skill_creator_available() -> bool:
+    try:
+        SkillLoader().load("skill-creator")
+        return True
+    except Exception:
+        return False
 
 @register_command(name="clear", description="清空会话命令", usage="/clear")
 async def cmd_clear(context: CommandContext, args: list[str]) -> str:

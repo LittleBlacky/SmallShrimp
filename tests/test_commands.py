@@ -244,9 +244,23 @@ Review the current diff.
 
 
 def test_cmd_skill_create_writes_standard_markdown_skill(tmp_path, monkeypatch):
-    """测试 /skill create 生成标准 SKILL.md 草稿。"""
+    """测试 /skill create 基于 skill-creator 生成标准 SKILL.md 草稿。"""
     from src.SmallShrimp.core.commands.handlers import cmd_skill
 
+    creator_dir = tmp_path / "workspace" / "skills" / "skill-creator"
+    creator_dir.mkdir(parents=True)
+    (creator_dir / "SKILL.md").write_text(
+        """---
+name: skill-creator
+description: Create and iterate standard skills from user task descriptions.
+---
+
+# Skill Creator
+
+Use draft, test prompts, evaluation, iteration, and description optimization.
+""",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(tmp_path)
 
     result = asyncio.run(
@@ -259,6 +273,7 @@ def test_cmd_skill_create_writes_standard_markdown_skill(tmp_path, monkeypatch):
     skill_file = tmp_path / "workspace" / "skills" / "meeting-summary" / "SKILL.md"
 
     assert "已创建技能草稿" in result
+    assert "skill-creator" in result
     assert "meeting-summary" in result
     assert skill_file.exists()
 
@@ -268,6 +283,9 @@ def test_cmd_skill_create_writes_standard_markdown_skill(tmp_path, monkeypatch):
     assert "# meeting-summary" in content
     assert "## When To Use" in content
     assert "## Workflow" in content
+    assert "## Test Prompts" in content
+    assert "## Iteration Notes" in content
+    assert "Created with guidance from `skill-creator`." in content
 
 
 def test_cmd_skill_create_refuses_existing_skill(tmp_path, monkeypatch):
