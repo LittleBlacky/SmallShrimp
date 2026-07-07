@@ -243,6 +243,64 @@ Review the current diff.
     assert "Review the current diff" in result
 
 
+def test_cmd_skill_create_writes_standard_markdown_skill(tmp_path, monkeypatch):
+    """测试 /skill create 生成标准 SKILL.md 草稿。"""
+    from src.SmallShrimp.core.commands.handlers import cmd_skill
+
+    monkeypatch.chdir(tmp_path)
+
+    result = asyncio.run(
+        cmd_skill(
+            SimpleNamespace(),
+            ["create", "meeting-summary", "Summarize meeting notes into decisions and todos."],
+        )
+    )
+
+    skill_file = tmp_path / "workspace" / "skills" / "meeting-summary" / "SKILL.md"
+
+    assert "已创建技能草稿" in result
+    assert "meeting-summary" in result
+    assert skill_file.exists()
+
+    content = skill_file.read_text(encoding="utf-8")
+    assert "name: meeting-summary" in content
+    assert "description: Summarize meeting notes into decisions and todos." in content
+    assert "# meeting-summary" in content
+    assert "## When To Use" in content
+    assert "## Workflow" in content
+
+
+def test_cmd_skill_create_refuses_existing_skill(tmp_path, monkeypatch):
+    """测试 /skill create 不覆盖已有 skill。"""
+    from src.SmallShrimp.core.commands.handlers import cmd_skill
+
+    skills_dir = tmp_path / "workspace" / "skills" / "meeting-summary"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        """---
+name: meeting-summary
+description: Existing skill.
+---
+
+# Existing
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = asyncio.run(
+        cmd_skill(
+            SimpleNamespace(),
+            ["create", "meeting-summary", "New description should not overwrite."],
+        )
+    )
+
+    content = (skills_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "已存在" in result
+    assert "Existing skill" in content
+    assert "New description should not overwrite" not in content
+
+
 if __name__ == "__main__":
     setup_module()
 

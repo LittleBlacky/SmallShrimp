@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .registry import register_command
@@ -34,12 +35,12 @@ class CommandContext:
         self._memory_manager = create_memory_manager(config or {})
         return self._memory_manager
 
-@register_command(name="skill", description="加载和管理技能内容", usage="/skill <list|show|name>")
+@register_command(name="skill", description="加载和管理技能内容", usage="/skill <list|show|create|name>")
 async def cmd_skill(context: CommandContext, args: list[str]) -> str:
     """加载和管理技能命令。"""
     loader = SkillLoader()
     if not args:
-        return "用法: /skill <list|show|name> [name]"
+        return "用法: /skill <list|show|create|name> [name] [description]"
 
     subcmd = args[0].lower()
     if subcmd == "list":
@@ -57,6 +58,10 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
         if len(args) < 2:
             return "用法: /skill show <name>"
         skill_name = args[1]
+    elif subcmd == "create":
+        if len(args) < 3:
+            return "用法: /skill create <name> <description>"
+        return _skill_create(args[1], " ".join(args[2:]))
     else:
         skill_name = args[0]
 
@@ -66,6 +71,52 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
         return f"已加载技能 [{skill_def.id or skill_name}] v{version}:\n\n{skill_def.content[:500]}..."
     except Exception as e:
         return f"技能 [{skill_name}] 不存在: {e}"
+
+
+def _skill_create(skill_name: str, description: str) -> str:
+    """Create a standard Markdown-first skill draft."""
+    skill_id = skill_name.strip()
+    description = description.strip()
+    if not skill_id or not description:
+        return "用法: /skill create <name> <description>"
+
+    skill_dir = Path("workspace/skills") / skill_id
+    skill_file = skill_dir / "SKILL.md"
+    if skill_file.exists():
+        return f"技能 `{skill_id}` 已存在: {skill_file}"
+
+    skill_dir.mkdir(parents=True, exist_ok=False)
+    skill_file.write_text(
+        f"""---
+name: {skill_id}
+description: {description}
+---
+
+# {skill_id}
+
+## When To Use
+
+Use this skill when the task matches this description:
+
+{description}
+
+## Workflow
+
+1. Clarify the task goal and success criteria.
+2. Gather the minimum required context.
+3. Follow the user's preferred format and constraints.
+4. Verify the output before reporting completion.
+
+## Notes
+
+- Keep this skill concise.
+- Move long references into `references/`.
+- Move deterministic helper code into `scripts/`.
+""",
+        encoding="utf-8",
+    )
+
+    return f"✓ 已创建技能草稿 `{skill_id}`: {skill_file}"
 
 @register_command(name="clear", description="清空会话命令", usage="/clear")
 async def cmd_clear(context: CommandContext, args: list[str]) -> str:
