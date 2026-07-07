@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 @pytest.mark.asyncio
 async def test_parallel_readonly_tools():
     """只读工具并行执行，写工具串行执行。"""
-    from src.SmallShrimp.core.agent import Agent, AgentSession
-    from src.SmallShrimp.core.session_state import SessionState
+    from src.SmallShrimp.core.runtime.agent import Agent, AgentSession
+    from src.SmallShrimp.core.runtime.session_state import SessionState
 
     # 构造 Agent，tool_registry 记录执行顺序
     registry = MagicMock()
@@ -60,8 +60,8 @@ async def test_parallel_readonly_tools():
 @pytest.mark.asyncio
 async def test_parallel_tools_time():
     """并行执行比串行快。"""
-    from src.SmallShrimp.core.agent import Agent, AgentSession
-    from src.SmallShrimp.core.session_state import SessionState
+    from src.SmallShrimp.core.runtime.agent import Agent, AgentSession
+    from src.SmallShrimp.core.runtime.session_state import SessionState
 
     registry = MagicMock()
 

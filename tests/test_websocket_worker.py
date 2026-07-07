@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """WebSocket Worker 测试。"""
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import ValidationError
 
-from src.SmallShrimp.core.events import WebSocketEventSource, InboundEvent, OutboundEvent
+from src.SmallShrimp.core.events.events import WebSocketEventSource, InboundEvent, OutboundEvent
 from src.SmallShrimp.server.workers.websocket import WebSocketWorker, WebSocketMessage
 
 

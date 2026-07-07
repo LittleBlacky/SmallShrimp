@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Callable, Awaitable, Generic, TypeVar, Any
 
-from ..core.events import EventSource
+from ..core.events.events import EventSource
 
 T = TypeVar("T", bound=EventSource)
 

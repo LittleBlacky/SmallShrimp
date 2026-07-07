@@ -6,7 +6,7 @@ import random
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from ...core.events import OutboundEvent
+from ...core.events.events import OutboundEvent
 from .base import SubscriberWorker
 
 if TYPE_CHECKING:

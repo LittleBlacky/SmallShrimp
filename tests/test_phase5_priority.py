@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from src.SmallShrimp.core.priority_resolver import (
+from src.SmallShrimp.core.context.priority_resolver import (
     PriorityResolver, InfoSlot, SourcePriority
 )
 

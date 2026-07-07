@@ -13,12 +13,12 @@ from .pipeline import ScoredEntry
 if TYPE_CHECKING:
     import sqlite3
     from .graph_store import GraphStore
-    from .builtin.file_store import MarkdownStore
+    from .builtin.file_store import MemoryStore
     from .builtin.hybrid_search import EmbeddingProvider
 
 
 class FTS5Searcher:
-    """Memory record search via MarkdownStore's FTS5 + vector hybrid.
+    """Memory record search via MemoryStore's FTS5 + vector hybrid.
 
     Wraps the existing hybrid_search() from builtin/hybrid_search.py.
     Results carry memory records (content, layer, score).
@@ -26,7 +26,7 @@ class FTS5Searcher:
 
     def __init__(
         self,
-        store: "MarkdownStore",
+        store: "MemoryStore",
         embedding_provider: "EmbeddingProvider | None" = None,
     ):
         self._store = store
@@ -48,7 +48,7 @@ class FTS5Searcher:
                 source="fts",
                 metadata={
                     "id": r.get("id"),
-                    "file_path": r.get("file_path", ""),
+                    "entity_type": r.get("entity_type", ""),
                     "created_at": r.get("created_at", ""),
                     "access_count": r.get("access_count", 0),
                 },

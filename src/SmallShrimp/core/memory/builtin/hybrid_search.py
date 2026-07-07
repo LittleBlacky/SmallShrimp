@@ -255,7 +255,7 @@ def hybrid_search(
         params.append(TOP_K_CANDIDATES)
 
         rows = conn.execute(
-            f"""SELECT mi.id, mi.file_path, mi.layer, mi.content, mi.created_at,
+            f"""SELECT mi.id, mi.layer, mi.content, mi.created_at,
                        mi.access_count, mi.entity_type
                 FROM memory_fts fts
                 JOIN memory_index mi ON mi.id = fts.rowid
@@ -268,9 +268,9 @@ def hybrid_search(
 
         for r in rows:
             all_results[r[0]] = {
-                "id": r[0], "file_path": r[1], "layer": r[2],
-                "content": r[3], "created_at": r[4],
-                "access_count": r[5] or 0, "entity_type": r[6] or "",
+                "id": r[0], "layer": r[1], "content": r[2],
+                "created_at": r[3], "access_count": r[4] or 0,
+                "entity_type": r[5] or "",
                 "fts_score": r.rank if hasattr(r, "rank") else 0,
             }
 
@@ -287,15 +287,14 @@ def hybrid_search(
                 if rowid not in all_results:
                     # 从 memory_index 获取详情
                     info = conn.execute(
-                        "SELECT id, file_path, layer, content, created_at, access_count, entity_type FROM memory_index WHERE id = ?",
+                        "SELECT id, layer, content, created_at, access_count, entity_type FROM memory_index WHERE id = ?",
                         (rowid,),
                     ).fetchone()
                     if info:
                         all_results[rowid] = {
-                            "id": info[0], "file_path": info[1], "layer": info[2],
-                            "content": info[3], "created_at": info[4],
-                            "access_count": info[5] or 0, "entity_type": info[6] or "",
-                            "fts_score": 0,
+                            "id": info[0], "layer": info[1], "content": info[2],
+                            "created_at": info[3], "access_count": info[4] or 0,
+                            "entity_type": info[5] or "", "fts_score": 0,
                         }
                 if rowid in all_results:
                     all_results[rowid]["vec_score"] = 1.0 - distance  # cosine → similarity

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """Server Workers 测试。"""
 import pytest
 from src.SmallShrimp.server.workers.delivery import (
@@ -48,7 +48,7 @@ def test_platform_limits():
 
 def test_delivery_worker_init():
     """测试 DeliveryWorker 初始化。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     class MockContext:
         def __init__(self):

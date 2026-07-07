@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import pytest
-from src.SmallShrimp.core.reflection import ReflectionEngine, ReflectionResult, REFLECTION_PROMPT
-from src.SmallShrimp.core.dreaming import DreamingEngine, ConflictPair, DreamResult
+from src.SmallShrimp.core.learning.reflection import ReflectionEngine, ReflectionResult, REFLECTION_PROMPT
+from src.SmallShrimp.core.learning.dreaming import DreamingEngine, ConflictPair, DreamResult
 
 
 # ═══════════════════════════════════════════════════════════

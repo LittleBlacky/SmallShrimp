@@ -12,12 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.SmallShrimp.core.agent import AgentSession
-from src.SmallShrimp.core.context_guard import ContextGuard
+from src.SmallShrimp.core.runtime.agent import AgentSession
+from src.SmallShrimp.core.context.context_guard import ContextGuard
 from src.SmallShrimp.core.memory.memory_manager import MemoryManager
-from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
-from src.SmallShrimp.core.prompt_builder import PromptBuilder
-from src.SmallShrimp.core.session_state import SessionState
+from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode
+from src.SmallShrimp.core.context.prompt_builder import PromptBuilder
+from src.SmallShrimp.core.runtime.session_state import SessionState
 from src.SmallShrimp.tools.decorators import tool
 from src.SmallShrimp.tools.registry import ToolRegistry
 

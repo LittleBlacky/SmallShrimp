@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from src.SmallShrimp.core.todo_tracker import TodoTracker, TaskItem, TaskStatus
-from src.SmallShrimp.core.tool_state import ToolStateMemory
+from src.SmallShrimp.core.context.todo_tracker import TodoTracker, TaskItem, TaskStatus
+from src.SmallShrimp.core.learning.tool_state import ToolStateMemory
 
 
 # ═══════════════════════════════════════════════════════════

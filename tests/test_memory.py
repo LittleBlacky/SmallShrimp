@@ -1,11 +1,12 @@
 from __future__ import annotations
 """Layered Memory Manager 测试。"""
 import tempfile
+import sqlite3
 from pathlib import Path
 
-from src.SmallShrimp.core.memory.builtin.file_store import MarkdownStore
+from src.SmallShrimp.core.memory.builtin.file_store import MemoryStore
 from src.SmallShrimp.core.memory.memory_manager import MemoryManager
-from src.SmallShrimp.core.message import HumanMessage, SystemMessage
+from src.SmallShrimp.core.runtime.message import HumanMessage, SystemMessage
 
 
 def test_memory_manager_init():
@@ -20,7 +21,7 @@ def test_memory_manager_init():
 
 def test_markdown_store_crud():
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = MarkdownStore(Path(tmpdir))
+        store = MemoryStore(Path(tmpdir) / "test.db")
         try:
             first = store.store("facts", "用户喜欢 Python 编程")
             assert first["id"] is not None
@@ -31,6 +32,41 @@ def test_markdown_store_crud():
             assert store.delete(first["id"]) is True
             results_after = store.search("Python", layer="facts")
             assert len(results_after) == 0
+        finally:
+            store.close()
+
+
+def test_memory_store_migrates_legacy_schema_missing_deleted_column():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "legacy.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE memory_index (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                layer TEXT NOT NULL,
+                content TEXT NOT NULL,
+                entity_type TEXT NOT NULL DEFAULT '',
+                access_count INTEGER NOT NULL DEFAULT 0,
+                source_turn_id TEXT NOT NULL DEFAULT '',
+                source_text TEXT NOT NULL DEFAULT '',
+                importance INTEGER NOT NULL DEFAULT 5,
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE memory_fts
+            USING fts5(content_jieba, content_raw, tokenize='unicode61');
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        store = MemoryStore(db_path)
+        try:
+            record = store.store("facts", "旧库迁移后可以继续写入")
+            assert record["id"] is not None
+            assert store.delete(record["id"]) is True
         finally:
             store.close()
 

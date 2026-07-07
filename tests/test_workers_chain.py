@@ -1,12 +1,12 @@
-"""Server Workers 集成测试 - 串联测试。"""
+﻿"""Server Workers 集成测试 - 串联测试。"""
 import asyncio
 import subprocess
 import sys
 
 import pytest
 
-from src.SmallShrimp.core.eventbus import EventBus
-from src.SmallShrimp.core.events import (
+from src.SmallShrimp.core.events.eventbus import EventBus
+from src.SmallShrimp.core.events.events import (
     OutboundEvent,
     InboundEvent,
     CliEventSource,
@@ -156,7 +156,7 @@ class TestWebSocketWorkerChain:
 
     def test_websocket_event_source(self):
         """测试 WebSocketEventSource 生成。"""
-        from src.SmallShrimp.core.events import WebSocketEventSource
+        from src.SmallShrimp.core.events.events import WebSocketEventSource
 
         source = WebSocketEventSource(user_id="user-001")
         source_str = str(source)
@@ -169,7 +169,7 @@ class TestChannelWorkerChain:
 
     def test_channel_callback_pattern(self):
         """测试 Channel 回调模式。"""
-        from src.SmallShrimp.core.events import EventSource
+        from src.SmallShrimp.core.events.events import EventSource
 
         async def channel_callback(message: str, source: EventSource) -> None:
             assert message == "test message"
@@ -278,3 +278,4 @@ asyncio.run(main())
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+

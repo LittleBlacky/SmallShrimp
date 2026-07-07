@@ -9,10 +9,11 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
-from ..core.agent import Agent
-from ..core.events import OutboundEvent, InboundEvent, CliEventSource
-from ..core.eventbus import EventBus
-from ..core.agent_loader import AgentLoader
+from ..core.runtime.agent import Agent
+from ..core.commands.base import AgentTask, resolve_command_result
+from ..core.events.events import OutboundEvent, InboundEvent, CliEventSource
+from ..core.events.eventbus import EventBus
+from ..core.definitions.agent_loader import AgentLoader
 from ..core.history import HistoryManager
 from ..utils.config import Config
 from ..server.context import Context
@@ -78,13 +79,7 @@ class ChatLoop:
                 )
                 result = await CommandRegistry.dispatch(event.content, cmd_context)
                 if result:
-                    await self.context.eventbus.publish(
-                        OutboundEvent(
-                            session_id=event.session_id,
-                            source=event.source,
-                            content=result,
-                        )
-                    )
+                    await self._publish_command_result(event, result)
                 else:
                     await self.context.eventbus.publish(
                         OutboundEvent(
@@ -92,7 +87,7 @@ class ChatLoop:
                             source=event.source,
                             content="未知命令",
                         )
-                    )
+                )
             else:
                 # 普通聊天
                 response = await self.session.chat(event.content)
@@ -114,6 +109,17 @@ class ChatLoop:
                 )
             )
         self.context.eventbus.ack(event)
+
+    async def _publish_command_result(self, event: InboundEvent, result: str | AgentTask) -> None:
+        """发布命令结果；AgentTask 会继续交给当前 Agent 执行。"""
+        content = await resolve_command_result(self.session, result)
+        await self.context.eventbus.publish(
+            OutboundEvent(
+                session_id=event.session_id,
+                source=event.source,
+                content=content,
+            )
+        )
 
     async def handle_outbound_event(self, event: OutboundEvent) -> None:
         """处理出站事件，将响应放入队列。"""
@@ -216,3 +222,4 @@ def run_chat(config: Config, agent_id: str | None = None) -> None:
     context = Context.from_workspace(Path(workspace))
     chat_loop = ChatLoop(context, agent_id=agent_id)
     asyncio.run(chat_loop.run())
+

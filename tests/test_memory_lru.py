@@ -1,16 +1,16 @@
-"""MarkdownStore 基本存储测试（当前实现无 LRU 淘汰）。"""
+"""MemoryStore 基本存储测试（当前实现无 LRU 淘汰）。"""
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from src.SmallShrimp.core.memory.builtin.file_store import MarkdownStore
+from src.SmallShrimp.core.memory.builtin.file_store import MemoryStore
 
 
 @pytest.fixture
 def fact_store():
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = MarkdownStore(Path(tmpdir))
+        store = MemoryStore(Path(tmpdir) / "test.db")
         try:
             yield store
         finally:

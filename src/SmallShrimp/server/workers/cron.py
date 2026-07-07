@@ -7,8 +7,8 @@ import shutil
 from typing import TYPE_CHECKING
 
 from .base import Worker
-from ...core.events import CronEventSource, DispatchEvent
-from ...core.cron_loader import find_due_jobs
+from ...core.events.events import CronEventSource, DispatchEvent
+from ...core.definitions.cron_loader import find_due_jobs
 
 if TYPE_CHECKING:
     from ..context import Context
@@ -41,7 +41,7 @@ class CronWorker(Worker):
 
         for cron_def in due_jobs:
             agent_def = self.context.agent_loader.load(cron_def.agent)
-            from ..core.agent import Agent
+            from ...core.runtime.agent import Agent
 
             agent = Agent(
                 agent_def,

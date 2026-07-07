@@ -7,7 +7,7 @@ from typing import Callable, Awaitable
 
 import aiohttp
 
-from ..core.events import EventSource
+from ..core.events.events import EventSource
 from .base import Channel
 
 logger = logging.getLogger(__name__)

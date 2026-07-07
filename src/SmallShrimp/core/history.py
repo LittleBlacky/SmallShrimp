@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from ..core.message import Message
+from .runtime.message import Message
 
 class HistoryManager:
     """管理会话历史的持久化。"""
@@ -22,7 +22,7 @@ class HistoryManager:
 
     def load(self, session_id: str) -> list[Message]:
         """加载会话历史。"""
-        from ..core.message import HumanMessage, AssistantMessage, ToolMessage
+        from .runtime.message import HumanMessage, AssistantMessage, ToolMessage
         file_path = self.sessions_dir / f"{session_id}.json"
         if not file_path.exists():
             return []

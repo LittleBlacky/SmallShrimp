@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
-from ...core.events import EventSource, InboundEvent
+from ...core.events.events import EventSource, InboundEvent
 from .base import Worker
 
 if TYPE_CHECKING:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketDisconnect
 
-from ...core.events import WebSocketEventSource, InboundEvent, OutboundEvent
+from ...core.events.events import WebSocketEventSource, InboundEvent, OutboundEvent
 
 if TYPE_CHECKING:
     from ..context import Context

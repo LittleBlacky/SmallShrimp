@@ -19,7 +19,16 @@ def tool(name: str | None = None, description: str | None = None):
         @wraps(fn)
         async def wrapper(**kwargs: Any) -> ToolResult:
             try:
-                result = fn(**kwargs)
+                sig = signature(fn)
+                accepts_kwargs = any(
+                    param.kind == Parameter.VAR_KEYWORD
+                    for param in sig.parameters.values()
+                )
+                call_kwargs = kwargs if accepts_kwargs else {
+                    key: value for key, value in kwargs.items()
+                    if key in sig.parameters
+                }
+                result = fn(**call_kwargs)
                 if hasattr(result, "__await__"):
                     result = await result
                 return ToolResult(success=True, content=str(result), error=None)

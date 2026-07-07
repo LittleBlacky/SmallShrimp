@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.SmallShrimp.core.memory.memory_manager import MemoryManager
-from src.SmallShrimp.core.prompt_builder import PromptBuilder
-from src.SmallShrimp.core.session_state import SessionState
+from src.SmallShrimp.core.context.prompt_builder import PromptBuilder
+from src.SmallShrimp.core.runtime.session_state import SessionState
 
 
 def _make_agent(mem, toolbox):

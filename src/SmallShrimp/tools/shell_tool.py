@@ -14,8 +14,8 @@ from ..tools.decorators import tool
 )
 async def shell(command: str, timeout: int = 30) -> str:
     """Execute a shell command with AST check + sandbox isolation."""
-    from ..core.shell_guard import check_shell_command
-    from ..core.sandbox import execute_sandboxed, SandboxConfig
+    from ..core.security.shell_guard import check_shell_command
+    from ..core.security.sandbox import execute_sandboxed, SandboxConfig
 
     # Layer 4: Bash AST check
     check = check_shell_command(command)

@@ -1,9 +1,8 @@
-"""Markdown 文件存储 + SQLite FTS5 索引。
+"""Memory store — SQLite as sole truth source.
 
-记忆以 .md 文件为真相源，SQLite 仅为检索加速。
-用户可直接编辑 .md 文件，修改后自动重新索引。
-
-检索: 使用 jieba 分词 + FTS5 OR 匹配（46% recall@5, 78ms）。
+No Markdown file dependency. All memories stored in SQLite with FTS5
+and optional vector search. Safety mechanisms include soft delete,
+version history, and audit log.
 """
 from __future__ import annotations
 
@@ -19,8 +18,6 @@ from .common import (
     MemoryRecord,
     VALID_MEMORY_LAYERS,
     _normalize_layer,
-    _new_memory_id,
-    same_layer_group,
     normalize_entity_type,
 )
 from .hybrid_search import (
@@ -58,43 +55,22 @@ def _expand_query_jieba(query: str) -> str:
         return query
     return " OR ".join(f'"{t}"' for t in terms)
 
-# ── 文件映射 ─────────────────────────────────────────────
-
-_LAYER_TO_FILE: dict[str, str] = {
-    "profile": "profile.md",
-    "facts": "facts.md",
-    "projects": "projects.md",
-    "reflections": "reflections.md",
-    "constraints": "constraints.md",
-    "sessions": None,  # sessions 用 daily/
-}
-
-_DAILY_DIR = "daily"
-
-
-def _file_path(memory_dir: Path, layer: MemoryLayer) -> Path:
-    """返回层对应的 .md 文件路径。"""
-    if layer == "sessions":
-        return memory_dir / _DAILY_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.md"
-    filename = _LAYER_TO_FILE.get(layer, f"{layer}.md")
-    return memory_dir / filename
-
 
 # ── Schema ───────────────────────────────────────────────
 
-_FTS_SCHEMA = """
+_SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_index (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_path   TEXT NOT NULL,
     layer       TEXT NOT NULL,
     content     TEXT NOT NULL,
-    bullet      TEXT NOT NULL,
-    mtime       INTEGER NOT NULL,
-    hash        TEXT NOT NULL,
+    file_path   TEXT NOT NULL DEFAULT '',
     entity_type TEXT NOT NULL DEFAULT '',
     access_count INTEGER NOT NULL DEFAULT 0,
     source_turn_id TEXT NOT NULL DEFAULT '',
     source_text  TEXT NOT NULL DEFAULT '',
+    importance  INTEGER NOT NULL DEFAULT 5,
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    version     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -103,53 +79,107 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
 USING fts5(content_jieba, content_raw, tokenize='unicode61');
 
 CREATE INDEX IF NOT EXISTS idx_index_layer ON memory_index(layer);
-CREATE INDEX IF NOT EXISTS idx_index_file ON memory_index(file_path);
+CREATE INDEX IF NOT EXISTS idx_index_deleted ON memory_index(deleted);
+
+CREATE TABLE IF NOT EXISTS memory_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id   INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    layer       TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    changed_at  TEXT NOT NULL,
+    changed_by  TEXT DEFAULT 'agent',
+    reason      TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS memory_audit (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id       INTEGER,
+    action          TEXT NOT NULL,
+    content_before  TEXT,
+    content_after   TEXT,
+    layer           TEXT,
+    timestamp       TEXT NOT NULL,
+    actor           TEXT DEFAULT 'agent',
+    reason          TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_record ON memory_audit(record_id);
+CREATE INDEX IF NOT EXISTS idx_history_record ON memory_history(record_id);
 """
 
 
-class MarkdownStore:
-    """Markdown 文件存储后端。
+class MemoryStore:
+    """SQLite-only memory store with safety mechanisms.
 
-    写入时: 追加 bullet 到 .md 文件 + 更新 SQLite FTS5 索引
-    检索时: FTS5 全文搜索，可选 HRR 向量融合
-    读取时: 从 .md 文件加载
+    Features:
+    - FTS5 full-text search (jieba segmentation)
+    - Optional vector search (sqlite-vec)
+    - Soft delete (recoverable)
+    - Version history (every edit tracked)
+    - Audit log (all operations logged)
     """
 
-    def __init__(self, memory_dir: Path, use_vector: bool = False,
+    def __init__(self, db_path: Path, use_vector: bool = False,
                  embedding_provider: EmbeddingProvider | None = None):
-        self.memory_dir = memory_dir
-        self.memory_dir.mkdir(parents=True, exist_ok=True)
-        (memory_dir / _DAILY_DIR).mkdir(parents=True, exist_ok=True)
+        self._db_path = db_path
+        self._conn = sqlite3.connect(str(db_path))
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.row_factory = sqlite3.Row
+            self._migrate_legacy_schema()
+            self._conn.executescript(_SCHEMA)
+        except Exception:
+            self._conn.close()
+            raise
 
-        # SQLite 索引
-        self._db_path = memory_dir / ".index.db"
-        self._conn = sqlite3.connect(str(self._db_path))
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.executescript(_FTS_SCHEMA)
-
-        # Embedding 提供者（本地 or API）
+        # Embedding provider
         self._embedding_provider = embedding_provider
         if self._embedding_provider is None and use_vector:
             self._embedding_provider = create_embedding_provider("local")
 
-        # 向量表（仅当 embedding 可用 + sqlite-vec 已安装）
+        # Vector table (optional)
         self._has_vector = bool(
-            self._embedding_provider is not None
-            and _HAS_SQLITE_VEC
+            self._embedding_provider is not None and _HAS_SQLITE_VEC
         )
         if self._has_vector:
             try:
                 setup_vector_table(self._conn, self._embedding_provider)
-                self._has_vector = True
             except Exception:
                 self._has_vector = False
 
-        # 确保所有层对应的 .md 文件存在
-        for layer in ["profile", "facts", "projects", "reflections", "constraints"]:
-            path = _file_path(memory_dir, layer)
-            if not path.exists():
-                path.write_text(f"# {_FILE_HEADERS.get(layer, layer)}\n\n", encoding="utf-8")
+    def _migrate_legacy_schema(self) -> None:
+        """Add missing columns for pre-safety-memory SQLite databases."""
+        exists = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_index'"
+        ).fetchone()
+        if not exists:
+            return
+
+        existing = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(memory_index)").fetchall()
+        }
+        columns = {
+            "file_path": "TEXT NOT NULL DEFAULT ''",
+            "bullet": "TEXT NOT NULL DEFAULT ''",
+            "entity_type": "TEXT NOT NULL DEFAULT ''",
+            "access_count": "INTEGER NOT NULL DEFAULT 0",
+            "source_turn_id": "TEXT NOT NULL DEFAULT ''",
+            "source_text": "TEXT NOT NULL DEFAULT ''",
+            "importance": "INTEGER NOT NULL DEFAULT 5",
+            "deleted": "INTEGER NOT NULL DEFAULT 0",
+            "version": "INTEGER NOT NULL DEFAULT 1",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                self._conn.execute(
+                    f"ALTER TABLE memory_index ADD COLUMN {name} {definition}"
+                )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -160,10 +190,10 @@ class MarkdownStore:
         except Exception:
             pass
 
-    # ── 写入 ───────────────────────────────────────────
+    # ── Write ────────────────────────────────────────────
 
     def store(self, layer: str, content: str, **kwargs: Any) -> MemoryRecord:
-        """写入一条记忆：写 .md 文件 + 更新索引。"""
+        """Store a memory entry. Returns the created record."""
         normalized = _normalize_layer(layer)
         content = content.strip()
         if not content:
@@ -175,85 +205,176 @@ class MarkdownStore:
         entity_type = normalize_entity_type(kwargs.get("entity_type"))
         source_turn_id = str(kwargs.get("source_turn_id", ""))
         source_text = str(kwargs.get("source_text", ""))
-        bullet = f"- {content}  `[{source}]`\n"
 
-        # 写入 .md 文件（追加）
-        file_path = _file_path(self.memory_dir, normalized)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(bullet)
+        insert_values = {
+            "layer": normalized,
+            "content": content,
+            "file_path": str(kwargs.get("file_path", "")),
+            "bullet": "",
+            "mtime": now.isoformat(),
+            "entity_type": entity_type,
+            "access_count": 0,
+            "source_turn_id": source_turn_id,
+            "source_text": source_text,
+            "importance": importance,
+            "deleted": 0,
+            "version": 1,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        table_columns = self._conn.execute("PRAGMA table_info(memory_index)").fetchall()
+        columns: list[str] = []
+        values: list[Any] = []
+        for column in table_columns:
+            name = column["name"]
+            if name == "id":
+                continue
+            if name in insert_values:
+                columns.append(name)
+                values.append(insert_values[name])
+            elif column["notnull"] and column["dflt_value"] is None:
+                columns.append(name)
+                values.append("")
 
-        # 更新索引
-        mtime = int(now.timestamp())
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+        placeholders = ", ".join("?" for _ in columns)
+        column_names = ", ".join(columns)
         cur = self._conn.execute(
-            """INSERT INTO memory_index (file_path, layer, content, bullet, mtime, hash,
-               entity_type, access_count, source_turn_id, source_text, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)""",
-            (str(file_path.relative_to(self.memory_dir)), normalized, content, bullet.strip(),
-             mtime, content_hash, entity_type, source_turn_id, source_text,
-             now.isoformat(), now.isoformat()),
+            f"INSERT INTO memory_index ({column_names}) VALUES ({placeholders})",
+            values,
         )
-        # 同步 FTS5（jieba 分词）
+        record_id = cur.lastrowid
+
+        # FTS5 index
         seg = _segment(content)
         self._conn.execute(
             "INSERT INTO memory_fts(rowid, content_jieba, content_raw) VALUES (?, ?, ?)",
-            (cur.lastrowid, seg, content),
+            (record_id, seg, content),
         )
-        # 同步向量（如果可用）
+
+        # Vector index (optional)
         if self._has_vector:
-            insert_vector(self._conn, cur.lastrowid, content, self._embedding_provider)
+            insert_vector(self._conn, record_id, content, self._embedding_provider)
+
+        # Audit log
+        self._audit(record_id, "create", None, content, normalized, "agent", source)
+
         self._conn.commit()
 
         return {
-            "id": str(self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]),
+            "id": str(record_id),
             "content": content,
             "layer": normalized,
             "source": source,
             "importance": importance,
-            "file_path": str(file_path),
         }
 
-    def store_daily(self, summary: str, completed: list[str] | None = None,
-                    todo: list[str] | None = None) -> None:
-        """写入每日日志。"""
-        today = datetime.now().strftime("%Y-%m-%d")
-        path = self.memory_dir / _DAILY_DIR / f"{today}.md"
+    # ── Update ───────────────────────────────────────────
 
-        # 当日志已存在时，追加内容
-        lines: list[str] = []
-        if path.exists():
-            content = path.read_text(encoding="utf-8").rstrip()
-            # 去掉末尾的旧摘要（如果有），保留待办
-            if "## 会话摘要" in content:
-                content = content[:content.index("## 会话摘要")].rstrip()
-            lines = [content]
+    def update(self, record_id: str, new_content: str, *,
+               reason: str = "", actor: str = "agent") -> bool:
+        """Update a memory entry. Saves version history and audit log."""
+        record = self._get_record(record_id)
+        if not record or record["deleted"]:
+            return False
 
-        lines.append(f"\n## 会话摘要\n- {summary}")
-        if completed:
-            lines.append(f"\n## 完成事项")
-            for item in completed:
-                lines.append(f"- {item}")
-        if todo:
-            lines.append(f"\n## 待办")
-            for item in todo:
-                lines.append(f"- [ ] {item}")
-        lines.append("")  # trailing newline
+        old_content = record["content"]
+        old_version = record["version"]
+        new_version = old_version + 1
+        now = datetime.now().isoformat()
 
-        path.write_text("\n".join(lines), encoding="utf-8")
+        # Save to history before updating
+        self._conn.execute(
+            """INSERT INTO memory_history
+               (record_id, content, layer, version, changed_at, changed_by, reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (record_id, old_content, record["layer"], old_version, now, actor, reason),
+        )
 
-    # ── 检索 ───────────────────────────────────────────
+        # Update the record
+        self._conn.execute(
+            """UPDATE memory_index
+               SET content = ?, version = ?, updated_at = ?
+               WHERE id = ?""",
+            (new_content, new_version, now, int(record_id)),
+        )
+
+        # Update FTS5
+        self._conn.execute(
+            "DELETE FROM memory_fts WHERE rowid = ?", (int(record_id),)
+        )
+        seg = _segment(new_content)
+        self._conn.execute(
+            "INSERT INTO memory_fts(rowid, content_jieba, content_raw) VALUES (?, ?, ?)",
+            (int(record_id), seg, new_content),
+        )
+
+        # Audit log
+        self._audit(int(record_id), "update", old_content, new_content,
+                    record["layer"], actor, reason)
+
+        self._conn.commit()
+        return True
+
+    # ── Soft Delete ──────────────────────────────────────
+
+    def delete(self, record_id: str, *,
+               reason: str = "", actor: str = "agent") -> bool:
+        """Soft delete — marks as deleted, keeps data for recovery."""
+        record = self._get_record(record_id)
+        if not record:
+            return False
+
+        now = datetime.now().isoformat()
+        self._conn.execute(
+            "UPDATE memory_index SET deleted = 1, updated_at = ? WHERE id = ?",
+            (now, int(record_id)),
+        )
+        self._conn.execute(
+            "DELETE FROM memory_fts WHERE rowid = ?", (int(record_id),)
+        )
+
+        # Audit log
+        self._audit(int(record_id), "delete", record["content"], None,
+                    record["layer"], actor, reason)
+
+        self._conn.commit()
+        return True
+
+    def restore(self, record_id: str, *,
+                reason: str = "", actor: str = "agent") -> bool:
+        """Restore a soft-deleted record."""
+        record = self._get_record(record_id, include_deleted=True)
+        if not record or not record["deleted"]:
+            return False
+
+        now = datetime.now().isoformat()
+        self._conn.execute(
+            "UPDATE memory_index SET deleted = 0, updated_at = ? WHERE id = ?",
+            (now, int(record_id)),
+        )
+        seg = _segment(record["content"])
+        self._conn.execute(
+            "INSERT INTO memory_fts(rowid, content_jieba, content_raw) VALUES (?, ?, ?)",
+            (int(record_id), seg, record["content"]),
+        )
+
+        # Audit log
+        self._audit(int(record_id), "restore", None, record["content"],
+                    record["layer"], actor, reason)
+
+        self._conn.commit()
+        return True
+
+    # ── Search ───────────────────────────────────────────
 
     def search(self, query: str, layer: str | None = None, limit: int = 10,
-               use_hrr: bool = False) -> list[MemoryRecord]:
-        """混合检索: FTS5 + 向量（可选）+ MMR + 时间衰减 + access_count 热度。"""
+               include_deleted: bool = False) -> list[MemoryRecord]:
+        """FTS5 + optional vector hybrid search."""
         if not query.strip():
             return []
 
-        # jieba OR 查询
         fts_q = _expand_query_jieba(query)
 
-        # 混合检索
         results = _hybrid_search(
             conn=self._conn,
             query=query,
@@ -264,53 +385,74 @@ class MarkdownStore:
             embedding_provider=self._embedding_provider,
         )
 
-        # 补齐 memory_index 中的字段
-        for r in results:
-            info = self._conn.execute(
-                "SELECT file_path, bullet, updated_at FROM memory_index WHERE id = ?",
-                (r["id"],),
-            ).fetchone()
-            if info:
-                r["file_path"] = info[0]
-                r["bullet"] = info[1]
-                r["updated_at"] = info[2]
+        # Filter deleted
+        if not include_deleted:
+            results = [r for r in results if not r.get("deleted")]
 
         return results
 
-        results = []
-        for row in rows:
-            results.append({
-                "id": str(row[0]),
-                "file_path": row[1],
-                "layer": row[2],
-                "content": row[3],
-                "bullet": row[4],
-                "fts_rank": row[7],
-                "created_at": row[5],
-                "updated_at": row[6],
-            })
+    # ── List / Get ───────────────────────────────────────
 
-        # HRR 重排序（如果启用）
-        if use_hrr and results:
-            try:
-                from ....benchmarks.unit.memory.hrr_vector_recall.hrr import encode_text, similarity
-                qv = encode_text(query)
-                for r in results:
-                    rv = encode_text(r["content"])
-                    r["hrr_score"] = (similarity(qv, rv) + 1.0) / 2.0
-                # 混合排序
-                for r in results:
-                    r["final_score"] = r.get("fts_rank", 0) * 0.4 + r.get("hrr_score", 0) * 0.6
-                results.sort(key=lambda r: r["final_score"], reverse=True)
-            except ImportError:
-                pass  # 无 HRR 则按 FTS5 排序
+    def list_all(self, layer: str | None = None, limit: int = 50,
+                 include_deleted: bool = False) -> list[MemoryRecord]:
+        """List all records."""
+        conditions = []
+        params: list[Any] = []
 
-        return results[:limit]
+        if not include_deleted:
+            conditions.append("deleted = 0")
+        if layer:
+            conditions.append("layer = ?")
+            params.append(_normalize_layer(layer))
 
-    # ── 命中回写 ──────────────────────────────────────
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+        rows = self._conn.execute(
+            f"""SELECT id, layer, content, entity_type, access_count,
+                       importance, version, created_at, updated_at, deleted
+                FROM memory_index {where}
+                ORDER BY id DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+
+        return [self._row_to_record(r) for r in rows]
+
+    def get(self, record_id: str) -> MemoryRecord | None:
+        """Get a single record by ID."""
+        return self._get_record(record_id)
+
+    def _get_record(self, record_id: str, *,
+                    include_deleted: bool = False) -> MemoryRecord | None:
+        """Internal: get a record by ID."""
+        condition = "" if include_deleted else "AND deleted = 0"
+        row = self._conn.execute(
+            f"""SELECT id, layer, content, entity_type, access_count,
+                       importance, version, created_at, updated_at, deleted
+                FROM memory_index WHERE id = ? {condition}""",
+            (int(record_id),),
+        ).fetchone()
+        return self._row_to_record(row) if row else None
+
+    @staticmethod
+    def _row_to_record(row) -> MemoryRecord:
+        """Convert a SQLite row to MemoryRecord dict."""
+        return {
+            "id": str(row["id"]),
+            "layer": row["layer"],
+            "content": row["content"],
+            "entity_type": row["entity_type"],
+            "access_count": row["access_count"],
+            "importance": row["importance"],
+            "version": row["version"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "deleted": bool(row["deleted"]),
+        }
+
+    # ── Access Count ─────────────────────────────────────
 
     def touch_recall(self, record_ids: list[int | str]) -> None:
-        """检索命中后回写 access_count + 1。"""
+        """Increment access_count on retrieval hit."""
         if not record_ids:
             return
         now = datetime.now().isoformat()
@@ -318,118 +460,96 @@ class MarkdownStore:
         placeholders = ",".join("?" for _ in ids)
         self._conn.execute(
             f"""UPDATE memory_index
-                SET access_count = access_count + 1,
-                    updated_at = ?
+                SET access_count = access_count + 1, updated_at = ?
                 WHERE id IN ({placeholders})""",
             [now] + ids,
         )
         self._conn.commit()
 
-    # ── 列出所有 ──────────────────────────────────────
+    # ── History ──────────────────────────────────────────
 
-    def list_all(self, layer: str | None = None, limit: int = 50) -> list[MemoryRecord]:
-        """列出索引中的所有记录。"""
-        params: list[Any] = []
-        layer_clause = ""
-        if layer:
-            normalized = _normalize_layer(layer)
-            layer_clause = "WHERE mi.layer = ?"
-            params.append(normalized)
-
+    def get_history(self, record_id: str) -> list[dict]:
+        """Get version history for a record."""
         rows = self._conn.execute(
-            f"""SELECT id, file_path, layer, content, bullet, created_at, updated_at
-                FROM memory_index mi
-                {layer_clause}
-                ORDER BY mi.id DESC
-                LIMIT ?""",
-            params + [limit],
+            """SELECT content, layer, version, changed_at, changed_by, reason
+               FROM memory_history WHERE record_id = ?
+               ORDER BY version DESC""",
+            (int(record_id),),
         ).fetchall()
+        return [
+            {
+                "content": r["content"],
+                "layer": r["layer"],
+                "version": r["version"],
+                "changed_at": r["changed_at"],
+                "changed_by": r["changed_by"],
+                "reason": r["reason"],
+            }
+            for r in rows
+        ]
 
-        return [{
-            "id": str(r[0]),
-            "file_path": r[1],
-            "layer": r[2],
-            "content": r[3],
-            "bullet": r[4],
-            "created_at": r[5],
-            "updated_at": r[6],
-        } for r in rows]
+    # ── Audit ────────────────────────────────────────────
 
-    def delete(self, record_id: str) -> bool:
-        """从索引中删除（不删除 .md 文件内容）。"""
-        cur = self._conn.execute("DELETE FROM memory_index WHERE id = ?", (record_id,))
-        self._conn.commit()
-        return cur.rowcount > 0
+    def get_audit(self, limit: int = 50, record_id: str | None = None) -> list[dict]:
+        """Get audit log entries."""
+        if record_id:
+            rows = self._conn.execute(
+                """SELECT id, record_id, action, content_before, content_after,
+                          layer, timestamp, actor, reason
+                   FROM memory_audit WHERE record_id = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (int(record_id), limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT id, record_id, action, content_before, content_after,
+                          layer, timestamp, actor, reason
+                   FROM memory_audit ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "record_id": r["record_id"],
+                "action": r["action"],
+                "content_before": r["content_before"],
+                "content_after": r["content_after"],
+                "layer": r["layer"],
+                "timestamp": r["timestamp"],
+                "actor": r["actor"],
+                "reason": r["reason"],
+            }
+            for r in rows
+        ]
 
-    def reindex(self) -> int:
-        """全量重建索引：扫描所有 .md 文件。"""
-        self._conn.execute("DELETE FROM memory_index")
-        count = 0
-        for md_file in self.memory_dir.rglob("*.md"):
-            if md_file.name == ".index.db":
-                continue
-            content = md_file.read_text(encoding="utf-8")
-            for line in content.split("\n"):
-                line = line.strip()
-                if line.startswith("- ") and "`[" in line:
-                    # 解析 bullet: "- content  `[source]`"
-                    bullet_text = line[2:]
-                    if "`[" in bullet_text:
-                        bullet_text = bullet_text[:bullet_text.index("`[")].strip()
-                    layer = _infer_layer(md_file, self.memory_dir)
-                    mtime = int(md_file.stat().st_mtime)
-                    text_hash = hashlib.sha256(line.encode()).hexdigest()[:16]
-                    rel_path = str(md_file.relative_to(self.memory_dir))
-                    now = datetime.now().isoformat()
-                    self._conn.execute(
-                        """INSERT INTO memory_index
-                           (file_path, layer, content, bullet, mtime, hash, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (rel_path, layer, bullet_text, line, mtime, text_hash, now, now),
-                    )
-                    # 同步 FTS5（jieba 分词）
-                    rowid = self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                    seg = _segment(bullet_text)
-                    self._conn.execute(
-                        "INSERT INTO memory_fts(rowid, content_jieba, content_raw) VALUES (?, ?, ?)",
-                        (rowid, seg, bullet_text),
-                    )
-                    count += 1
-        self._conn.commit()
-        return count
+    def _audit(self, record_id: int, action: str,
+               content_before: str | None, content_after: str | None,
+               layer: str, actor: str = "agent", reason: str = "") -> None:
+        """Write an audit log entry."""
+        self._conn.execute(
+            """INSERT INTO memory_audit
+               (record_id, action, content_before, content_after, layer,
+                timestamp, actor, reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record_id, action, content_before, content_after, layer,
+             datetime.now().isoformat(), actor, reason),
+        )
 
+    # ── Export ───────────────────────────────────────────
 
-# ── Helpers ─────────────────────────────────────────────
+    def export_markdown(self, layer: str | None = None) -> str:
+        """Export memories as Markdown (read-only, for user viewing)."""
+        records = self.list_all(layer=layer, limit=1000)
+        if not records:
+            return ""
 
-_FILE_HEADERS = {
-    "profile": "用户档案",
-    "facts": "知识",
-    "projects": "项目上下文",
-    "reflections": "经验教训",
-    "constraints": "硬性约束（不参与压缩）",
-}
+        lines: list[str] = []
+        current_layer = None
 
+        for r in records:
+            if r["layer"] != current_layer:
+                current_layer = r["layer"]
+                lines.append(f"\n## {current_layer}\n")
+            lines.append(f"- {r['content']}")
 
-def _infer_layer(file_path: Path, memory_dir: Path) -> str:
-    """从文件路径推断记忆层。"""
-    name = file_path.stem
-    for layer in VALID_MEMORY_LAYERS:
-        if layer == name:
-            return layer
-    if file_path.parent.name == _DAILY_DIR:
-        return "sessions"
-    return "facts"
-
-
-def _fts_escape(query: str) -> str:
-    """FTS5 查询转义（保留以备无 jieba 时的回退）。"""
-    cleaned = _re.sub(r'[^\w\s]', ' ', query)
-    terms = [t for t in cleaned.split() if t]
-    if not terms:
-        return query
-    if len(terms) == 1:
-        return terms[0]
-    return ' OR '.join(terms)
-
-
-
+        return "\n".join(lines)

@@ -52,7 +52,7 @@ class GraphContext:
 class GraphStore:
     """SQLite-backed knowledge graph with FTS5 search.
 
-    Can share a connection with MarkdownStore by passing conn= at init.
+    Can share a connection with MemoryStore by passing conn= at init.
     Table names (entities/relations/entities_fts) don't conflict with
     memory tables (memory_index/memory_fts/memory_vec).
     """

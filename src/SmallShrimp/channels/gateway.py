@@ -64,7 +64,7 @@ class GatewayManager:
 
         try:
             # 从 target 构造一个合适的 EventSource 占位
-            from ..core.events import AgentEventSource
+            from ..core.events.events import AgentEventSource
             source = AgentEventSource(agent_id="system")
             await channel.reply(content, source)
             self._stats[target.platform].sent += 1

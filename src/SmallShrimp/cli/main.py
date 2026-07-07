@@ -30,7 +30,7 @@ def _resolve_workspace() -> Path:
     return ws
 
 
-app = typer.Typer(help="SmallShrimp - AI Agent")
+app = typer.Typer(help="SmallShrimp - evolving personal assistant Agent")
 
 
 @app.command()

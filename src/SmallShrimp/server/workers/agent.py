@@ -6,8 +6,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .base import SubscriberWorker
-from ...core.agent import Agent
-from ...core.events import (
+from ...core.runtime.agent import Agent
+from ...core.commands.base import resolve_command_result
+from ...core.events.events import (
     InboundEvent, OutboundEvent, CliEventSource,
     AgentEventSource, DispatchEvent, DispatchResultEvent,
 )
@@ -117,7 +118,7 @@ class AgentWorker(SubscriberWorker):
 
                 # 优先检查斜杠命令
                 if event.content.startswith("/"):
-                    from ..core.commands.handlers import CommandContext
+                    from ...core.commands.handlers import CommandContext
                     cmd_context = CommandContext(
                         session,
                         routing_table=self.context.routing_table,
@@ -127,7 +128,8 @@ class AgentWorker(SubscriberWorker):
                         event.content, cmd_context
                     )
                     if result:
-                        await self._emit_response(event, result)
+                        response = await resolve_command_result(session, result)
+                        await self._emit_response(event, response)
                         logger.info(f"命令执行完成: {session_id}")
                         return
 

@@ -1,20 +1,20 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """应用上下文 - 依赖注入容器。"""
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..core.routing import RoutingTable
+from ..core.events.routing import RoutingTable
 
 if TYPE_CHECKING:
-    from ..core.agent_loader import AgentLoader
-    from ..core.cron_loader import CronLoader
+    from ..core.definitions.agent_loader import AgentLoader
+    from ..core.definitions.cron_loader import CronLoader
     from ..core.history import HistoryManager
-    from ..core.eventbus import EventBus
+    from ..core.events.eventbus import EventBus
     from ..core.commands.registry import CommandRegistry
-    from ..core.prompt_builder import PromptBuilder
+    from ..core.context.prompt_builder import PromptBuilder
     from ..core.memory import MemoryManager
-    from ..core.skill_loader import SkillLoader
+    from ..core.definitions.skill_loader import SkillLoader
     from ..tools.registry import ToolRegistry
     from ..utils.config import Config
     from ..channels.base import Channel
@@ -45,14 +45,14 @@ class Context:
     def from_workspace(cls, workspace: Path) -> "Context":
         """从工作区路径创建完整的 Context。"""
         from ..utils.config import Config
-        from ..core.agent_loader import AgentLoader
-        from ..core.skill_loader import SkillLoader
+        from ..core.definitions.agent_loader import AgentLoader
+        from ..core.definitions.skill_loader import SkillLoader
         from ..core.history import HistoryManager
-        from ..core.eventbus import EventBus
+        from ..core.events.eventbus import EventBus
         from ..core.commands.registry import CommandRegistry
-        from ..core.prompt_builder import PromptBuilder
+        from ..core.context.prompt_builder import PromptBuilder
         from ..core.memory import create_memory_manager
-        from ..core.cron_loader import CronLoader
+        from ..core.definitions.cron_loader import CronLoader
         from ..tools import create_tool_registry
         from ..channels import create_channels_from_config, create_gateway_manager
 

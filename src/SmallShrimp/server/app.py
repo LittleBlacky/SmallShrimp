@@ -7,7 +7,7 @@ from .context import Context
 from .api import sessions as sessions_api
 from .api import config as config_api
 from .workers.desktop_chat import DesktopChatHandler
-from ..core.events import OutboundEvent
+from ..core.events.events import OutboundEvent
 
 
 def create_app(context: Context) -> FastAPI:
@@ -108,7 +108,7 @@ def create_app(context: Context) -> FastAPI:
             source = _make_wecom_source(msg, wecom_channel)
             # 发布 InboundEvent
             import time as _time
-            from ..core.events import InboundEvent
+            from ..core.events.events import InboundEvent
             session_id = _get_session_id(context, source)
             event = InboundEvent(
                 session_id=session_id,

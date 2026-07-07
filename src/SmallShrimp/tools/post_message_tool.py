@@ -9,10 +9,10 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from ..core.events import AgentEventSource, OutboundEvent
+from ..core.events.events import AgentEventSource, OutboundEvent
 
 if TYPE_CHECKING:
-    from ..core.agent import AgentSession
+    from ..core.runtime.agent import AgentSession
     from ..server.context import Context
     from ..tools.base import Tool
 

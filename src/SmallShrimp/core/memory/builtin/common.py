@@ -30,14 +30,14 @@ class MemoryRecord(TypedDict, total=False):
     importance: int
     confidence: float
     recall_count: int
-    access_count: int  # 检索命中次数
-    last_recalled_at: str
-    entity_type: str  # 实体类型标签
-    source_turn_id: str  # 来源对话轮次 ID
-    source_text: str  # 来源原文
+    access_count: int
+    entity_type: str
+    source_turn_id: str
+    source_text: str
+    deleted: bool
+    version: int
     created_at: str
     updated_at: str
-    archived: bool
 
 
 # ── ID generation ───────────────────────────────────────

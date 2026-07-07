@@ -2,8 +2,8 @@ from __future__ import annotations
 """多阶段压缩测试。"""
 import os
 import tempfile
-from src.SmallShrimp.core.context_guard import ContextGuard, PERSIST_THRESHOLD
-from src.SmallShrimp.core.message import HumanMessage, ToolMessage
+from src.SmallShrimp.core.context.context_guard import ContextGuard, PERSIST_THRESHOLD
+from src.SmallShrimp.core.runtime.message import HumanMessage, ToolMessage
 
 
 def test_snip_duplicates_replaces_old_results():

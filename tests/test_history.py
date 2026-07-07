@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from src.SmallShrimp.core.history import HistoryManager
-from src.SmallShrimp.core.message import HumanMessage, AssistantMessage, ToolMessage
+from src.SmallShrimp.core.runtime.message import HumanMessage, AssistantMessage, ToolMessage
 
 
 def test_history_manager_init():

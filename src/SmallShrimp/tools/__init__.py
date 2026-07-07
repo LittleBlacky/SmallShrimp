@@ -20,7 +20,7 @@ def create_tool_registry(config: dict) -> ToolRegistry:
     skills_dir = config.get("skills_dir", "workspace/skills")
     from pathlib import Path
     from .skill_tool import create_skill_tool
-    from ..core.skill_loader import SkillLoader
+    from ..core.definitions.skill_loader import SkillLoader
     skill_loader = SkillLoader(Path(skills_dir))
     registry.register(create_skill_tool(skill_loader))
 

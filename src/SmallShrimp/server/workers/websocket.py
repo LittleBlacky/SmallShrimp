@@ -11,7 +11,7 @@ from fastapi.websockets import WebSocketDisconnect
 from pydantic import ValidationError
 
 from .base import SubscriberWorker
-from ...core.events import Event, EventSource, InboundEvent, OutboundEvent
+from ...core.events.events import Event, EventSource, InboundEvent, OutboundEvent
 
 if TYPE_CHECKING:
     from ..context import Context
@@ -51,7 +51,7 @@ class WebSocketWorker(SubscriberWorker):
 
     async def _run_client_loop(self, ws: WebSocket) -> None:
         """运行客户端消息接收循环。"""
-        from ...core.events import WebSocketEventSource
+        from ...core.events.events import WebSocketEventSource
 
         while True:
             try:

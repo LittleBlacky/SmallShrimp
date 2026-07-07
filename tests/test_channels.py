@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """Channel 基类测试。"""
 import pytest
 from src.SmallShrimp.channels.base import Channel
@@ -89,7 +89,7 @@ def test_discord_channel_whitelist():
 
 def test_event_source_from_string_registry():
     """测试 EventSource 字符串解析注册表。"""
-    from src.SmallShrimp.core.events import EventSource
+    from src.SmallShrimp.core.events.events import EventSource
 
     # CLI
     cli = EventSource.from_string("platform-cli:cli-user")

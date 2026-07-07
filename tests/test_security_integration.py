@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 @pytest.mark.asyncio
 async def test_security_full_pipeline_safe_read():
     """安全读文件通过全部 7 层。"""
-    from src.SmallShrimp.core.agent import Agent, AgentSession
-    from src.SmallShrimp.core.message import HumanMessage, AssistantMessage, ToolMessage
-    from src.SmallShrimp.core.session_state import SessionState
-    from src.SmallShrimp.core.permissions import PermissionMode
+    from src.SmallShrimp.core.runtime.agent import Agent, AgentSession
+    from src.SmallShrimp.core.runtime.message import HumanMessage, AssistantMessage, ToolMessage
+    from src.SmallShrimp.core.runtime.session_state import SessionState
+    from src.SmallShrimp.core.security.permissions import PermissionMode
 
     # Mock Agent
     agent = MagicMock()
@@ -60,10 +60,10 @@ async def test_security_full_pipeline_safe_read():
 @pytest.mark.asyncio
 async def test_security_write_needs_confirmation():
     """写文件触发确认流程。"""
-    from src.SmallShrimp.core.agent import Agent, AgentSession
-    from src.SmallShrimp.core.message import HumanMessage, ToolMessage
-    from src.SmallShrimp.core.session_state import SessionState
-    from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode, PermissionResult
+    from src.SmallShrimp.core.runtime.agent import Agent, AgentSession
+    from src.SmallShrimp.core.runtime.message import HumanMessage, ToolMessage
+    from src.SmallShrimp.core.runtime.session_state import SessionState
+    from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode, PermissionResult
 
     agent = MagicMock()
     agent.tool_registry = MagicMock()
@@ -119,7 +119,7 @@ async def test_security_write_needs_confirmation():
 @pytest.mark.asyncio
 async def test_security_shell_blocked_dangerous():
     """危险 shell 命令被 AST 层拦截。"""
-    from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
+    from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode
 
     checker = PermissionChecker(PermissionMode.DEFAULT)
 
@@ -132,7 +132,7 @@ async def test_security_shell_blocked_dangerous():
 @pytest.mark.asyncio
 async def test_security_path_validation_blocks_env():
     """路径验证拦截 .env 写入。"""
-    from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
+    from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode
 
     checker = PermissionChecker(PermissionMode.DEFAULT)
     r = checker.check("write", {"path": ".env"})
@@ -142,7 +142,7 @@ async def test_security_path_validation_blocks_env():
 @pytest.mark.asyncio
 async def test_security_path_whitelist():
     """路径白名单：确认一次后不再问。"""
-    from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode, set_workspace_boundary
+    from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode, set_workspace_boundary
     import os
 
     set_workspace_boundary(os.getcwd())
@@ -165,7 +165,7 @@ async def test_security_path_whitelist():
 @pytest.mark.asyncio
 async def test_security_guardrail_warns_loop():
     """Guardrail 检测重复失败。"""
-    from src.SmallShrimp.core.tool_guardrails import ToolGuardrailController, GuardrailConfig
+    from src.SmallShrimp.core.security.tool_guardrails import ToolGuardrailController, GuardrailConfig
 
     ctrl = ToolGuardrailController(GuardrailConfig(
         exact_failure_warn_after=2,
@@ -191,7 +191,7 @@ async def test_security_guardrail_warns_loop():
 @pytest.mark.asyncio
 async def test_security_correction_detected():
     """纠正信号被检测。"""
-    from src.SmallShrimp.core.correction import detect_correction, CorrectionConfidence
+    from src.SmallShrimp.core.learning.correction import detect_correction, CorrectionConfidence
 
     s = detect_correction("不对，应该是 config.yaml")
     assert s is not None
@@ -201,7 +201,7 @@ async def test_security_correction_detected():
 @pytest.mark.asyncio
 async def test_security_failure_learning_cross_turn():
     """跨轮失败学习写入 note。"""
-    from src.SmallShrimp.core.failure_learning import FailureLearner
+    from src.SmallShrimp.core.learning.failure_learning import FailureLearner
 
     learner = FailureLearner(threshold=2)
     learner.observe_turn([{"tool_name": "read", "error": "not found"}])
@@ -213,7 +213,7 @@ async def test_security_failure_learning_cross_turn():
 @pytest.mark.asyncio
 async def test_security_trust_scan_detects_env():
     """Trust Dialog 扫描检测 .env。"""
-    from src.SmallShrimp.core.trust import TrustManager
+    from src.SmallShrimp.core.security.trust import TrustManager
     from pathlib import Path
 
     with tempfile.TemporaryDirectory() as d:
@@ -228,7 +228,7 @@ async def test_security_trust_scan_detects_env():
 @pytest.mark.asyncio
 async def test_security_ast_quoted_safe():
     """tree-sitter AST: 引号内命令不误判。"""
-    from src.SmallShrimp.core.shell_guard import check_shell_command
+    from src.SmallShrimp.core.security.shell_guard import check_shell_command
 
     # 'rm -rf /' 在引号内 → 安全
     r = check_shell_command("echo 'rm -rf /'")
@@ -242,7 +242,7 @@ async def test_security_ast_quoted_safe():
 @pytest.mark.asyncio
 async def test_security_sandbox_execution():
     """沙箱执行安全命令。"""
-    from src.SmallShrimp.core.sandbox import execute_sandboxed
+    from src.SmallShrimp.core.security.sandbox import execute_sandboxed
 
     result = execute_sandboxed("python -c \"print('sandbox ok')\"")
     assert result.error == ""
@@ -252,7 +252,7 @@ async def test_security_sandbox_execution():
 @pytest.mark.asyncio
 async def test_security_full_chain_write_denied():
     """全链路：写 .env → 路径验证拒绝 → 不执行。"""
-    from src.SmallShrimp.core.permissions import PermissionChecker, PermissionMode
+    from src.SmallShrimp.core.security.permissions import PermissionChecker, PermissionMode
 
     checker = PermissionChecker(PermissionMode.DEFAULT)
     r = checker.check("write", {"path": ".env"})

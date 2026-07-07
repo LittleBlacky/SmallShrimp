@@ -1,12 +1,14 @@
 # SmallShrimp Hooks 系统设计文档
 
+> Current implementation direction lives in `docs/superpowers/specs/2026-07-07-runtime-hooks-design.md` and `docs/runtime-hooks.md`. This document is retained as earlier background.
+
 ---
 
 ## 1. 为什么需要 Hooks
 
 ### 1.1 项目现状
 
-SmallShrimp 是一个 AI Agent 框架，目前已具备以下基础设施：
+SmallShrimp 是一个可多端响应、持续进化的个人助理 Agent，目前已具备以下基础设施：
 
 - **EventBus** (`core/eventbus.py`): 发布/订阅模式的事件总线，支持 `subscribe` / `publish` / `run`，用于跨组件异步通信
 - **Agent Loop** (`core/agent.py`): 完整的 `chat → LLM call → tool execution → repeat → response` 循环

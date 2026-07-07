@@ -1,6 +1,6 @@
 from __future__ import annotations
 """命令注册表。"""
-from .base import Command
+from .base import Command, CommandResult
 
 _commands: dict[str, Command] = {}
 
@@ -42,7 +42,7 @@ class CommandRegistry:
         return (name, args)
 
     @classmethod
-    async def dispatch(cls, user_input: str, context: "CommandContext") -> "str | None":
+    async def dispatch(cls, user_input: str, context: "CommandContext") -> "CommandResult | None":
         """异步解析并执行命令。"""
         parsed = cls.parse(user_input)
         if not parsed:

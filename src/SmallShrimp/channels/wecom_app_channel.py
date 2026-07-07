@@ -15,7 +15,7 @@ from typing import Callable, Awaitable
 import aiohttp
 from Crypto.Cipher import AES
 
-from ..core.events import EventSource
+from ..core.events.events import EventSource
 from .base import Channel
 
 logger = logging.getLogger(__name__)

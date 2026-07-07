@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Callable, Awaitable
 
-from ..core.events import EventSource
+from ..core.events.events import EventSource
 from ..utils.config import TelegramConfig
 from .base import Channel
 

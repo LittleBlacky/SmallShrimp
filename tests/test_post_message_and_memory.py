@@ -69,7 +69,7 @@ def test_cookie_agent_exists():
 def test_cookie_agent_loader_loads():
     """AgentLoader 能加载 Cookie。"""
     from pathlib import Path
-    from src.SmallShrimp.core.agent_loader import AgentLoader
+    from src.SmallShrimp.core.definitions.agent_loader import AgentLoader
 
     loader = AgentLoader(Path("workspace/agents"))
     cookie = loader.load("cookie")
@@ -81,7 +81,7 @@ def test_cookie_agent_loader_loads():
 def test_agent_loader_discovers_cookie():
     """AgentLoader.discover_agents 包含 Cookie。"""
     from pathlib import Path
-    from src.SmallShrimp.core.agent_loader import AgentLoader
+    from src.SmallShrimp.core.definitions.agent_loader import AgentLoader
 
     loader = AgentLoader(Path("workspace/agents"))
     agents = loader.discover_agents()
