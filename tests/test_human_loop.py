@@ -4,6 +4,11 @@ from src.SmallShrimp.core.runtime.human_loop import (
     HumanRequest,
     HumanResponse,
 )
+from src.SmallShrimp.core.runtime.session_state import SessionState
+
+
+class DummyAgent:
+    pass
 
 
 def test_human_request_round_trips_dict():
@@ -59,3 +64,28 @@ def test_human_checkpoint_round_trips_dict():
 
     assert restored == checkpoint
     assert restored.messages_snapshot[0]["role"] == "user"
+
+
+def test_session_state_tracks_pending_human_request():
+    state = SessionState(session_id="s1", agent=DummyAgent())
+    request = HumanRequest(
+        id="hr_1",
+        type="clarification",
+        session_id="s1",
+        turn_id="t1",
+        question="需要澄清吗？",
+    )
+    checkpoint = HumanCheckpoint(
+        request_id="hr_1",
+        session_id="s1",
+        turn_id="t1",
+        messages_snapshot=[],
+    )
+
+    state.pending_human_request = request
+    state.pending_human_checkpoint = checkpoint
+    state.human_trace.append({"event": "human.interrupted", "request_id": "hr_1"})
+
+    assert state.pending_human_request is request
+    assert state.pending_human_checkpoint is checkpoint
+    assert state.human_trace[0]["event"] == "human.interrupted"

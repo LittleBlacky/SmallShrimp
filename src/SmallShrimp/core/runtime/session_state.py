@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .agent import Agent
+    from .human_loop import HumanCheckpoint, HumanRequest
     from ..events.events import EventSource
     from ..history import HistoryManager
     from ..context.prompt_builder import PromptBuilder
@@ -43,6 +44,9 @@ class SessionState:
     session_tool_result_bytes: int = 0
     max_session_tool_result_bytes: int = 256 * 1024
     delivery_target: str = ""  # 主动投递目标平台（cron/无来源会话使用）
+    pending_human_request: Optional["HumanRequest"] = None
+    pending_human_checkpoint: Optional["HumanCheckpoint"] = None
+    human_trace: list[dict] = field(default_factory=list)
 
     def filter_new_memories(self, records: list[dict]) -> list[dict]:
         """按本会话记忆预算筛选尚未展示过的记忆。"""
