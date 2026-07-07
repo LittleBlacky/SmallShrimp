@@ -243,9 +243,11 @@ Review the current diff.
     assert "Review the current diff" in result
 
 
-def test_cmd_skill_create_writes_standard_markdown_skill(tmp_path, monkeypatch):
-    """测试 /skill create 基于 skill-creator 生成标准 SKILL.md 草稿。"""
-    from src.SmallShrimp.core.commands.handlers import cmd_skill
+def test_cmd_skill_create_delegates_to_agent_with_skill_creator(tmp_path, monkeypatch):
+    """测试 /skill create 把创建任务委托给 agent 使用 skill-creator。"""
+    from src.SmallShrimp.core.commands.base import AgentTask
+    from src.SmallShrimp.core.commands.handlers import CommandContext, cmd_skill
+    from src.SmallShrimp.core.runtime.message import AssistantMessage, HumanMessage
 
     creator_dir = tmp_path / "workspace" / "skills" / "skill-creator"
     creator_dir.mkdir(parents=True)
@@ -262,34 +264,35 @@ Use draft, test prompts, evaluation, iteration, and description optimization.
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
+    state = SimpleNamespace(messages=[
+        HumanMessage(content="刚才我们把 /skill create 改成 AgentTask 委托，而不是命令层直接写模板。"),
+        AssistantMessage(content="已完成：CLI 和 server worker 都会把 AgentTask 交给当前 session.chat 执行。"),
+    ])
+    context = CommandContext(session=SimpleNamespace(state=state))
 
     result = asyncio.run(
         cmd_skill(
-            SimpleNamespace(),
+            context,
             ["create", "meeting-summary", "Summarize meeting notes into decisions and todos."],
         )
     )
 
     skill_file = tmp_path / "workspace" / "skills" / "meeting-summary" / "SKILL.md"
 
-    assert "已创建技能草稿" in result
-    assert "skill-creator" in result
-    assert "meeting-summary" in result
-    assert skill_file.exists()
-
-    content = skill_file.read_text(encoding="utf-8")
-    assert "name: meeting-summary" in content
-    assert "description: Summarize meeting notes into decisions and todos." in content
-    assert "# meeting-summary" in content
-    assert "## When To Use" in content
-    assert "## Workflow" in content
-    assert "## Test Prompts" in content
-    assert "## Iteration Notes" in content
-    assert "Created with guidance from `skill-creator`." in content
+    assert isinstance(result, AgentTask)
+    assert "skill-creator" in result.prompt
+    assert "meeting-summary" in result.prompt
+    assert "Summarize meeting notes into decisions and todos." in result.prompt
+    assert "workspace/skills/meeting-summary/SKILL.md" in result.prompt
+    assert "Recent completed-task context" in result.prompt
+    assert "AgentTask 委托" in result.prompt
+    assert "session.chat" in result.prompt
+    assert "Do not create a generic starter skill" in result.prompt
+    assert not skill_file.exists()
 
 
 def test_cmd_skill_create_refuses_existing_skill(tmp_path, monkeypatch):
-    """测试 /skill create 不覆盖已有 skill。"""
+    """测试 /skill create 已有 skill 时不委托覆盖。"""
     from src.SmallShrimp.core.commands.handlers import cmd_skill
 
     skills_dir = tmp_path / "workspace" / "skills" / "meeting-summary"
@@ -317,6 +320,46 @@ description: Existing skill.
     assert "已存在" in result
     assert "Existing skill" in content
     assert "New description should not overwrite" not in content
+
+
+def test_chat_loop_runs_agent_task_from_command():
+    """测试 CLI 收到 AgentTask 命令结果后继续交给当前 session.chat。"""
+    from src.SmallShrimp.cli.chat import ChatLoop
+    from src.SmallShrimp.core.commands.base import AgentTask
+    from src.SmallShrimp.core.events.events import InboundEvent, OutboundEvent, CliEventSource
+
+    class FakeBus:
+        def __init__(self):
+            self.events = []
+
+        async def publish(self, event):
+            self.events.append(event)
+
+        def ack(self, event):
+            self.acked = event
+
+    class FakeSession:
+        async def chat(self, prompt):
+            self.prompt = prompt
+            return "created by agent"
+
+    loop = object.__new__(ChatLoop)
+    loop.context = SimpleNamespace(eventbus=FakeBus())
+    loop.session = FakeSession()
+
+    event = InboundEvent(
+        session_id="sess-001",
+        source=CliEventSource(),
+        content="/skill create meeting-summary summarize meetings",
+    )
+
+    asyncio.run(ChatLoop._publish_command_result(loop, event, AgentTask(prompt="use skill-creator")))
+
+    assert loop.session.prompt == "use skill-creator"
+    assert len(loop.context.eventbus.events) == 1
+    outbound = loop.context.eventbus.events[0]
+    assert isinstance(outbound, OutboundEvent)
+    assert outbound.content == "created by agent"
 
 
 if __name__ == "__main__":

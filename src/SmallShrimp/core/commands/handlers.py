@@ -2,7 +2,9 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .base import AgentTask
 from .registry import register_command
+from ..definitions.skill_creator_task import SkillCreatorRequest, build_skill_creator_task
 from ..definitions.skill_loader import SkillLoader
 from ..memory import MemoryManager
 
@@ -61,7 +63,7 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
     elif subcmd == "create":
         if len(args) < 3:
             return "用法: /skill create <name> <description>"
-        return _skill_create(args[1], " ".join(args[2:]))
+        return _skill_create(context, args[1], " ".join(args[2:]))
     else:
         skill_name = args[0]
 
@@ -73,8 +75,8 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
         return f"技能 [{skill_name}] 不存在: {e}"
 
 
-def _skill_create(skill_name: str, description: str) -> str:
-    """Create a standard Markdown-first skill draft using skill-creator guidance."""
+def _skill_create(context: CommandContext, skill_name: str, description: str) -> str | AgentTask:
+    """把 skill 创建需求委托给 Agent 使用 skill-creator 完成。"""
     skill_id = skill_name.strip()
     description = description.strip()
     if not skill_id or not description:
@@ -85,61 +87,40 @@ def _skill_create(skill_name: str, description: str) -> str:
     if skill_file.exists():
         return f"技能 `{skill_id}` 已存在: {skill_file}"
 
-    creator_available = _skill_creator_available()
-    skill_dir.mkdir(parents=True, exist_ok=False)
-    skill_file.write_text(
-        f"""---
-name: {skill_id}
-description: {description}
----
-
-# {skill_id}
-
-## When To Use
-
-Use this skill when the task matches this description:
-
-{description}
-
-## Workflow
-
-1. Clarify the task goal and success criteria.
-2. Gather the minimum required context.
-3. Follow the user's preferred format and constraints.
-4. Verify the output before reporting completion.
-
-## Test Prompts
-
-- Ask SmallShrimp to handle a concrete task that should trigger this skill.
-- Ask a neighboring task that should not trigger this skill.
-- Ask an underspecified version of the task and check whether SmallShrimp asks only necessary clarifying questions.
-
-## Iteration Notes
-
-- Improve `description` if this skill does not trigger in the right situations.
-- Move repeated deterministic operations into `scripts/`.
-- Move long reference material into `references/`.
-
-## Notes
-
-- Created with guidance from `skill-creator`.
-- Keep this skill concise.
-- Move long references into `references/`.
-- Move deterministic helper code into `scripts/`.
-""",
-        encoding="utf-8",
+    return build_skill_creator_task(
+        SkillCreatorRequest(
+            skill_id=skill_id,
+            requirement=description,
+            recent_context=_recent_session_context(context),
+            origin="user",
+        )
     )
 
-    source = "基于 `skill-creator`" if creator_available else "使用内置 skill-creator 模板"
-    return f"✓ 已创建技能草稿 `{skill_id}` ({source}): {skill_file}"
 
+def _recent_session_context(context: CommandContext, *, max_messages: int = 12, max_chars: int = 6000) -> str:
+    """Render recent conversation context for skill creation."""
+    state = getattr(context.session, "state", None)
+    messages = list(getattr(state, "messages", []) or [])
+    if not messages:
+        return "(No prior session messages are available. Ask concise follow-up questions if the requirement is too generic.)"
 
-def _skill_creator_available() -> bool:
-    try:
-        SkillLoader().load("skill-creator")
-        return True
-    except Exception:
-        return False
+    rendered: list[str] = []
+    for message in messages[-max_messages:]:
+        role = message.__class__.__name__.replace("Message", "").lower() or "message"
+        content = getattr(message, "content", "") or ""
+        content = content.strip()
+        if not content:
+            continue
+        if len(content) > 1000:
+            content = f"{content[:1000]}..."
+        rendered.append(f"- {role}: {content}")
+
+    text = "\n".join(rendered)
+    if not text:
+        return "(No usable prior session text is available. Ask concise follow-up questions if the requirement is too generic.)"
+    if len(text) > max_chars:
+        text = f"{text[-max_chars:]}"
+    return text
 
 @register_command(name="clear", description="清空会话命令", usage="/clear")
 async def cmd_clear(context: CommandContext, args: list[str]) -> str:
@@ -155,6 +136,24 @@ async def cmd_help(context: CommandContext, args: list[str]) -> str:
     lines = ["可用命令:"]
     for cmd in commands:
         lines.append(f"  {cmd.usage} - {cmd.description}")
+    return "\n".join(lines)
+
+
+@register_command(name="fork", description="基于当前上下文 fork 一个新会话", usage="/fork [task]")
+async def cmd_fork(context: CommandContext, args: list[str]) -> str:
+    """Fork 当前会话上下文到一个新的独立会话。"""
+    from ..runtime.fork import ForkOptions, fork_session
+
+    task = " ".join(args).strip()
+    forked = fork_session(context.session, ForkOptions(task=task))
+    lines = [
+        f"✓ 已 fork 新会话 `{forked.session_id}`",
+        f"父会话: `{forked.parent_session_id}`",
+        f"Agent: `{forked.agent_id}`",
+        f"继承消息数: {len(forked.messages)}",
+    ]
+    if task:
+        lines.append(f"任务: {task}")
     return "\n".join(lines)
 
 @register_command(name="compact", description="压缩上下文命令", usage="/compact")
@@ -303,7 +302,7 @@ async def cmd_cron(context: CommandContext, args: list[str]) -> str:
 def _cron_add(context: CommandContext, schedule: str, name: str, agent: str, prompt: str) -> str:
     """创建定时任务。"""
     from pathlib import Path
-    from ..cron_loader import CronLoader
+    from ..definitions.cron_loader import CronLoader
 
     crons_dir = Path("workspace/crons")
     cron_id = name.lower().replace(" ", "-")
@@ -326,7 +325,7 @@ agent: {agent}
 def _cron_list(context: CommandContext) -> str:
     """列出所有定时任务。"""
     from pathlib import Path
-    from ..cron_loader import CronLoader
+    from ..definitions.cron_loader import CronLoader
 
     crons_dir = Path("workspace/crons")
     loader = CronLoader(crons_dir)
@@ -393,7 +392,7 @@ async def cmd_agents(context: CommandContext, args: list[str]) -> str:
     loader = agent.agent_def.__class__.__name__  # 需要 AgentLoader
     # 通过 session agent 的 history 路径反推 agents_dir
     from pathlib import Path
-    from ..agent_loader import AgentLoader
+    from ..definitions.agent_loader import AgentLoader
 
     history_path = getattr(agent.history_manager, 'sessions_dir', Path("workspace/sessions"))
     agents_dir = history_path.parent / "agents"
