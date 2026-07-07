@@ -9,7 +9,7 @@
 
 ### 1.1 文件职责
 
-> 路径相对于仓库根目录 `g:\agent\SmallShrimp\desktop-app\`
+> 路径相对于仓库根目录 `g:\agent\SmallShrimp\apps\desktop\`
 
 ```
 src/main/
@@ -386,7 +386,7 @@ linux:
 
 ---
 
-## 8. 文件清单（`desktop-app/` 下新建）
+## 8. 文件清单（`apps/desktop/` 下新建）
 
 | 文件 | 说明 |
 |------|------|

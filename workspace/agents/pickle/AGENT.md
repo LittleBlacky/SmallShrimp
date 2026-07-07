@@ -2,8 +2,8 @@
 name: Pickle
 description: A friendly cat assistant who helps with coding and daily tasks.
 llm:
-  provider: deepseek
-  model: deepseek/deepseek-v4-flash
+  provider: openai
+  model: openai/gpt-5.5
   temperature: 0.7
   context_window: 1000000
   max_tokens: 393216

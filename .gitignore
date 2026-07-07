@@ -24,6 +24,7 @@ venv/
 env/
 ENV/
 .venv
+node_modules/
 
 # IDE
 .vscode/
@@ -51,6 +52,7 @@ workspace/sessions/
 workspace/.cache/
 workspace/memories/
 workspace/crons/
+memories/
 
 **/uv.lock
 
@@ -66,13 +68,15 @@ generate_diff.sh
 # build time populate
 web/public/steps
 
-# agents
+# local agent/runtime tooling
 .agents/
-skills-lock.json
 .claude/
 .codegraph/
 .tmp/
+.pytest_cache/
+skills-lock.json
+.trae/
 
-memories/
-
-./trae
+# local reference drops / screenshots
+references/
+assets/screenshots/

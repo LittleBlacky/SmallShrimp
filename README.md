@@ -7,10 +7,29 @@
 <h1 align="center">🦐 SmallShrimp</h1>
 
 <p align="center">
-  SmallShrimp 是一个模块化、事件驱动的 AI 智能体框架，提供从单 Agent 聊天到多 Agent 协作、从 CLI 到多平台渠道、从内存持久化到生产级安全防护的全链路能力。
+  SmallShrimp 是一个可多端响应、持续进化的个人助理 Agent。它的主场是用户的电脑：文件、文档、表格、幻灯片、代码项目、消息、日程和日常习惯。它从协助用户完成任务开始，逐步理解用户，近似替代用户，最终反哺并提升用户。
 </p>
 
 ---
+
+## 🎯 产品愿景
+
+SmallShrimp 的目标不是做一个通用 Agent 框架，而是做一个长期运行在用户电脑场景里的个人助理 Agent。
+
+它需要能够自主派生多个场景 Agent：写作 Agent、PPT Agent、表格 Agent、代码 Agent、个人事务 Agent 等。不同 Agent 有自己的任务场景，但共享同一个用户画像、长期记忆、偏好、工具和反馈闭环。
+
+### 四阶段演进
+
+| 阶段 | 目标 | 能力重点 |
+|------|------|----------|
+| **第一阶段：任务助理** | 协助用户完成具体任务 | 多端响应、工具调用、文件/命令/Web/消息协作、任务闭环 |
+| **第二阶段：用户克隆** | 越来越懂用户的任务场景、画像和偏好 | 长期记忆、偏好学习、方法论沉淀、类似任务快速复用 |
+| **第三阶段：自我进化** | 在近似替代用户后持续优化并超越用户原有方法 | 反思、失败学习、流程优化、知识与技能沉淀 |
+| **第四阶段：反馈提升用户** | 不只替用户完成任务，还帮助用户提升 | 总结规律、指出低效习惯、提供更好的方法，让 Agent 与人相辅相成 |
+
+工程上，SmallShrimp 采用 harness engineering 思路：模型只是推理核心，真正让助理可靠、个性化并持续进化的是围绕模型构建的上下文、工具、权限、记忆、观测和反馈系统。
+
+更完整的产品定义见 [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md)。
 
 ## ✨ 特性一览
 
@@ -179,6 +198,29 @@ mcp_servers:
 
 ## 🏗️ 架构
 
+### 仓库分层
+
+```
+SmallShrimp/
+├── src/SmallShrimp/              # Python 主包：Agent、工具、Provider、Server、渠道适配
+├── tests/                        # pytest 测试
+├── docs/                         # 产品、架构、功能设计文档
+├── apps/
+│   └── desktop/                  # Electron 桌面端
+├── examples/
+│   └── default_workspace/        # 示例工作区配置
+├── workspace/                    # 本地运行时工作区（用户配置、Agent、Skill、会话、记忆）
+├── benchmarks/                   # 性能/记忆系统基准测试
+├── scripts/                      # 项目维护脚本
+├── references/
+│   ├── tutorials/                # 教程型参考项目
+│   ├── external-agents/          # 外部 Agent 架构参考
+│   └── knowledge-apps/           # 知识库/记忆应用参考
+└── assets/                       # 图片、截图等静态资产
+```
+
+主项目开发默认只改 `src/SmallShrimp/`、`tests/`、`docs/` 和必要的 `apps/desktop/`。`references/` 下内容作为参考材料，不参与 SmallShrimp 包构建。
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │                      Server                          │
@@ -212,29 +254,14 @@ mcp_servers:
 ```
 src/SmallShrimp/
 ├── core/              # 核心逻辑
-│   ├── agent.py           # Agent 会话管理、工具调用循环
-│   ├── agent_loader.py    # Agent 定义加载
-│   ├── context.py         # 运行时上下文
-│   ├── context_guard.py   # 4 级上下文压缩
-│   ├── eventbus.py        # 异步事件总线
-│   ├── events.py          # 事件类型定义
+│   ├── runtime/           # Agent 会话、消息、TurnContext、SessionState
+│   ├── context/           # PromptBuilder、上下文压缩、话题/优先级/待办上下文
+│   ├── security/          # 权限、信任、沙箱、Shell 检查、工具护栏
+│   ├── definitions/       # Agent / Skill / Cron 定义加载
+│   ├── events/            # 事件类型、EventBus、路由、Worker 基类
+│   ├── learning/          # 纠错、反思、失败学习、模式学习
 │   ├── history.py         # 会话历史持久化
-│   ├── message.py         # 消息类型
-│   ├── prompt_builder.py  # 7 层提示词组装
-│   ├── routing.py         # 多 Agent 路由
 │   ├── mcp.py             # MCP 协议集成
-│   ├── skill_loader.py    # 技能发现与加载
-│   ├── skill_def.py       # SKILL.md 解析
-│   ├── cron_loader.py     # 定时任务发现
-│   ├── shell_guard.py     # Shell AST 安全分析
-│   ├── sandbox.py         # 沙箱隔离
-│   ├── trust.py           # 信任对话框
-│   ├── permissions.py     # 权限模式
-│   ├── tool_guardrails.py # 工具级安全护栏
-│   ├── correction.py      # 用户纠错检测
-│   ├── failure_learning.py# 失败模式学习
-│   ├── session_state.py   # 会话状态管理
-│   ├── worker.py          # 基础 Worker
 │   ├── commands/          # 斜杠命令
 │   └── memory/            # 持久化记忆系统
 ├── tools/              # 工具系统
@@ -416,7 +443,7 @@ pytest tests/test_tool_registry.py
 
 ## 📚 学习资源
 
-项目附带了一份完整的 **18 步教程** `build-your-own-openclaw/`，从零开始逐步构建 AI Agent：
+项目附带了一份完整的 **18 步教程** `references/tutorials/build-your-own-openclaw/`，用于理解底层 Agent 工程能力如何逐步构建：
 
 | 阶段 | 步骤 | 主题 |
 |------|------|------|

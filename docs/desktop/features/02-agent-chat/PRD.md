@@ -8,7 +8,7 @@
 
 ### 1.1 产品定位
 
-Agent 聊天是 SmallShrimp Desktop 的核心交互闭环：用户在图形界面中与 AI Agent 对话，消息实时流式渲染，历史会话可管理。
+助理聊天是 SmallShrimp Desktop 的核心交互闭环：用户在图形界面中与个人助理 Agent 对话，消息实时流式渲染，历史会话可管理。
 
 ### 1.2 核心价值
 

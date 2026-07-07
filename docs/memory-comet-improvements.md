@@ -1,7 +1,7 @@
 # SmallShrimp 记忆层参考 Comet 改进方案
 
 > 2026-06-16
-> 对照 [Comet](https://github.com/lm041520/Comet) 的 Neo4j 知识图谱记忆系统，提炼出适用于 SmallShrimp 轻量 Agent 框架的改进项。
+> 对照 [Comet](https://github.com/lm041520/Comet) 的 Neo4j 知识图谱记忆系统，提炼出适用于 SmallShrimp 持续进化个人助理 Agent 的记忆层改进项。
 
 ---
 

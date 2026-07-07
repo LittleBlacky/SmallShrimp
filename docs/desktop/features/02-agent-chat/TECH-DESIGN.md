@@ -467,7 +467,7 @@ export async function deleteSession(port: number, id: string): Promise<void> {
 
 ---
 
-## 10. 文件清单（`desktop-app/` 下新建）
+## 10. 文件清单（`apps/desktop/` 下新建）
 
 | 文件 | 说明 |
 |------|------|

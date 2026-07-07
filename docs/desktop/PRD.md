@@ -8,7 +8,7 @@
 
 ### 1.1 产品定位
 
-SmallShrimp Desktop 是 SmallShrimp AI Agent 框架的桌面客户端，让用户通过图形界面与本地 AI Agent 进行交互，无需接触命令行。
+SmallShrimp Desktop 是 SmallShrimp 持续进化个人助理 Agent 的桌面客户端，让用户通过图形界面与本地个人助理进行交互，无需接触命令行。
 
 ### 1.2 核心价值
 
@@ -24,7 +24,7 @@ SmallShrimp Desktop 是 SmallShrimp AI Agent 框架的桌面客户端，让用�
 
 - **AI 重度用户**：日常使用多个 LLM，需要一个统一的本地桌面入口
 - **开发者**：需要本地 Agent 辅助编码、查资料、执行 Shell 任务
-- **非技术用户**：想用 AI Agent 但不愿碰命令行
+- **非技术用户**：想使用个人助理完成任务但不愿碰命令行
 
 ---
 

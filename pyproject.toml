@@ -1,7 +1,7 @@
 [project]
 name = "smallshrimp"
 dynamic = ["version"]
-description = "Build Your Own AI Agent"
+description = "A multi-endpoint, continuously evolving personal assistant Agent"
 requires-python = ">=3.11"
 
 dependencies = [
