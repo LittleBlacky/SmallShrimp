@@ -1,10 +1,10 @@
-# Versioned Skill Model Implementation Plan
+# Markdown-First Versioned Skill Model Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first phase of SmallShrimp's skill evolution system: versioned skills with metadata, active-version loading, usage tracking, rollback support, and backward compatibility for existing flat `SKILL.md` skills.
+**Goal:** Build the first phase of SmallShrimp's skill evolution system: Markdown-first skills with optional metadata, optional version history, usage tracking, rollback support when versions exist, and compatibility with existing flat `SKILL.md` skills.
 
-**Architecture:** Keep the current `src/SmallShrimp/core/definitions` boundary, but split versioned skill concerns into small files: metadata parsing, usage tracking, and loader orchestration. Existing callers of `SkillDef`, `SkillLoader.discover_skills()`, `SkillLoader.load()`, and `create_skill_tool()` must continue to work.
+**Architecture:** Keep `SKILL.md` as the only required skill entrypoint. Keep the current `src/SmallShrimp/core/definitions` boundary, but split optional skill management concerns into small files: metadata parsing, usage tracking, and loader orchestration. Existing callers of `SkillDef`, `SkillLoader.discover_skills()`, `SkillLoader.load()`, and `create_skill_tool()` must continue to work.
 
 **Tech Stack:** Python 3.11+, dataclasses, pathlib, yaml, pytest, `conda run -n smallshrimp`.
 
@@ -16,11 +16,11 @@
   - Keep the legacy frontmatter parser.
   - Extend `SkillDef` with version metadata fields while preserving existing constructor compatibility.
 - Create: `src/SmallShrimp/core/definitions/skill_metadata.py`
-  - Define `SkillMetadata`, allowed status/risk/source values, YAML parsing, and serialization.
+  - Define `SkillMetadata`, allowed origin/status/risk values, frontmatter/YAML parsing, and serialization.
 - Create: `src/SmallShrimp/core/definitions/skill_usage.py`
   - Define usage records and helpers for `usage.json`.
 - Modify: `src/SmallShrimp/core/definitions/skill_loader.py`
-  - Support legacy flat skills and versioned skills.
+  - Support Markdown-first skills, optional `skill.yaml`, and optional version directories.
   - Add metadata-only discovery.
   - Add new version creation and rollback helpers.
 - Modify: `src/SmallShrimp/core/definitions/skill_matcher.py`
@@ -39,7 +39,7 @@
 - Modify: `tests/test_skill_tool.py`
 - Modify: `tests/test_commands.py`
 
-## Task 1: Add Skill Metadata Model
+## Task 1: Add Markdown-First Skill Metadata Model
 
 **Files:**
 - Create: `src/SmallShrimp/core/definitions/skill_metadata.py`
@@ -68,9 +68,10 @@ def test_skill_metadata_from_yaml_file(tmp_path: Path):
                 "name": "Code Review",
                 "description": "Review code changes.",
                 "scene": "coding",
+                "origin": "learned",
                 "status": "active",
                 "created_by": "agent",
-                "current_version": "1.1.0",
+                "version": "1.1.0",
                 "confidence": 0.82,
                 "risk_level": "medium",
                 "triggers": ["code review", "审查代码"],
@@ -89,7 +90,8 @@ def test_skill_metadata_from_yaml_file(tmp_path: Path):
     assert metadata.scene == "coding"
     assert metadata.status == "active"
     assert metadata.created_by == "agent"
-    assert metadata.current_version == "1.1.0"
+    assert metadata.origin == "learned"
+    assert metadata.version == "1.1.0"
     assert metadata.confidence == 0.82
     assert metadata.risk_level == "medium"
     assert metadata.triggers == ["code review", "审查代码"]
@@ -107,7 +109,7 @@ def test_skill_metadata_requires_core_fields(tmp_path: Path):
     except ValueError as exc:
         assert "name" in str(exc)
         assert "description" in str(exc)
-        assert "current_version" in str(exc)
+        assert "triggers" in str(exc)
 
 
 def test_skill_metadata_to_dict_roundtrip():
@@ -116,9 +118,10 @@ def test_skill_metadata_to_dict_roundtrip():
         name="Document Summary",
         description="Summarize documents.",
         scene="document",
+        origin="learned",
         status="draft",
         created_by="agent",
-        current_version="0.1.0",
+        version="0.1.0",
         confidence=0.4,
         risk_level="low",
         triggers=["summary"],
@@ -127,6 +130,7 @@ def test_skill_metadata_to_dict_roundtrip():
     data = metadata.to_dict()
 
     assert data["id"] == "document.summary"
+    assert data["origin"] == "learned"
     assert data["status"] == "draft"
     assert data["risk_level"] == "low"
     assert data["triggers"] == ["summary"]
@@ -158,17 +162,12 @@ import yaml
 SkillStatus = Literal["draft", "active", "deprecated", "archived"]
 SkillRiskLevel = Literal["low", "medium", "high"]
 SkillCreatedBy = Literal["agent", "user", "bundled"]
+SkillOrigin = Literal["user", "learned", "bundled"]
 
 REQUIRED_METADATA_FIELDS = (
     "id",
     "name",
     "description",
-    "scene",
-    "status",
-    "created_by",
-    "current_version",
-    "confidence",
-    "risk_level",
     "triggers",
 )
 
@@ -178,13 +177,14 @@ class SkillMetadata:
     id: str
     name: str
     description: str
-    scene: str
-    status: SkillStatus
-    created_by: SkillCreatedBy
-    current_version: str
-    confidence: float
-    risk_level: SkillRiskLevel
     triggers: list[str]
+    scene: str | None = None
+    origin: SkillOrigin = "user"
+    status: SkillStatus = "active"
+    created_by: SkillCreatedBy = "user"
+    version: str | None = None
+    confidence: float = 1.0
+    risk_level: SkillRiskLevel = "low"
     source_task_id: str | None = None
     pinned: bool = False
     requires_approval: bool = False
@@ -207,17 +207,21 @@ class SkillMetadata:
         if missing:
             raise ValueError(f"Missing required skill metadata fields: {', '.join(missing)}")
 
-        status = data["status"]
+        status = data.get("status", "active")
         if status not in ("draft", "active", "deprecated", "archived"):
             raise ValueError(f"Invalid skill status: {status}")
 
-        risk_level = data["risk_level"]
+        risk_level = data.get("risk_level", "low")
         if risk_level not in ("low", "medium", "high"):
             raise ValueError(f"Invalid skill risk_level: {risk_level}")
 
-        created_by = data["created_by"]
+        created_by = data.get("created_by", "user")
         if created_by not in ("agent", "user", "bundled"):
             raise ValueError(f"Invalid skill created_by: {created_by}")
+
+        origin = data.get("origin", "user")
+        if origin not in ("user", "learned", "bundled"):
+            raise ValueError(f"Invalid skill origin: {origin}")
 
         triggers = data.get("triggers") or []
         if not isinstance(triggers, list):
@@ -227,13 +231,14 @@ class SkillMetadata:
             id=str(data["id"]),
             name=str(data["name"]),
             description=str(data["description"]),
-            scene=str(data["scene"]),
+            triggers=[str(trigger) for trigger in triggers],
+            scene=str(data["scene"]) if data.get("scene") is not None else None,
+            origin=origin,
             status=status,
             created_by=created_by,
-            current_version=str(data["current_version"]),
-            confidence=float(data["confidence"]),
+            version=str(data["version"]) if data.get("version") is not None else None,
+            confidence=float(data.get("confidence", 1.0)),
             risk_level=risk_level,
-            triggers=[str(trigger) for trigger in triggers],
             source_task_id=data.get("source_task_id"),
             pinned=bool(data.get("pinned", False)),
             requires_approval=bool(data.get("requires_approval", False)),
@@ -250,13 +255,14 @@ class SkillMetadata:
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "triggers": list(self.triggers),
             "scene": self.scene,
+            "origin": self.origin,
             "status": self.status,
             "created_by": self.created_by,
-            "current_version": self.current_version,
+            "version": self.version,
             "confidence": self.confidence,
             "risk_level": self.risk_level,
-            "triggers": list(self.triggers),
             "source_task_id": self.source_task_id,
             "pinned": self.pinned,
             "requires_approval": self.requires_approval,
@@ -312,7 +318,7 @@ description: Review code.
 scene: coding
 status: active
 created_by: agent
-current_version: 1.0.0
+version: 1.0.0
 confidence: 0.9
 risk_level: medium
 triggers:
@@ -329,7 +335,7 @@ Review the change.
     assert skill.scene == "coding"
     assert skill.status == "active"
     assert skill.created_by == "agent"
-    assert skill.current_version == "1.0.0"
+    assert skill.version == "1.0.0"
     assert skill.confidence == 0.9
     assert skill.risk_level == "medium"
     assert skill.triggers == ["review"]
@@ -343,7 +349,7 @@ def test_skill_def_to_dict_includes_metadata_when_present():
         scene="coding",
         status="active",
         created_by="agent",
-        current_version="1.0.0",
+        version="1.0.0",
         confidence=0.9,
         risk_level="medium",
         triggers=["review"],
@@ -353,7 +359,7 @@ def test_skill_def_to_dict_includes_metadata_when_present():
 
     assert data["scene"] == "coding"
     assert data["status"] == "active"
-    assert data["current_version"] == "1.0.0"
+    assert data["version"] == "1.0.0"
     assert data["confidence"] == 0.9
     assert data["risk_level"] == "medium"
 ```
@@ -401,7 +407,7 @@ class SkillDef:
     scene: str | None = None
     status: str | None = None
     created_by: str | None = None
-    current_version: str | None = None
+    version: str | None = None
     confidence: float | None = None
     risk_level: str | None = None
     source_task_id: str | None = None
@@ -426,7 +432,7 @@ class SkillDef:
             "scene": self.scene,
             "status": self.status,
             "created_by": self.created_by,
-            "current_version": self.current_version,
+            "version": self.version,
             "confidence": self.confidence,
             "risk_level": self.risk_level,
             "source_task_id": self.source_task_id,
@@ -472,7 +478,7 @@ class SkillDef:
             scene=metadata.get("scene"),
             status=metadata.get("status"),
             created_by=metadata.get("created_by"),
-            current_version=str(metadata["current_version"]) if metadata.get("current_version") is not None else None,
+            version=str(metadata["version"]) if metadata.get("version") is not None else None,
             confidence=float(metadata["confidence"]) if metadata.get("confidence") is not None else None,
             risk_level=metadata.get("risk_level"),
             source_task_id=metadata.get("source_task_id"),
@@ -669,7 +675,7 @@ git add src/SmallShrimp/core/definitions/skill_usage.py tests/test_skill_usage.p
 git commit -m "feat: add skill usage tracking"
 ```
 
-## Task 4: Load Versioned Skills
+## Task 4: Load Markdown-First and Optional Versioned Skills
 
 **Files:**
 - Modify: `src/SmallShrimp/core/definitions/skill_loader.py`
@@ -687,25 +693,32 @@ def create_versioned_skill_dir(parent: Path, name: str) -> Path:
     version_dir.mkdir(parents=True)
     (version_dir / "SKILL.md").write_text("# Active Version\n\nUse this version.", encoding="utf-8")
     (skill_dir / "SKILL.md").write_text("# Stale Entrypoint\n\nDo not load this when version exists.", encoding="utf-8")
-    (skill_dir / "skill.yaml").write_text(
-        """id: coding.code-review
+    (skill_dir / "SKILL.md").write_text(
+        """---
+id: coding.code-review
 name: Code Review
 description: Review code.
 scene: coding
+origin: learned
 status: active
 created_by: agent
-current_version: 1.1.0
+version: 1.1.0
 confidence: 0.8
 risk_level: medium
 triggers:
   - review
+---
+
+# Stale Entrypoint
+
+Do not load this when version exists.
 """,
         encoding="utf-8",
     )
     return skill_dir
 
 
-def test_skill_loader_loads_current_version_from_metadata():
+def test_skill_loader_loads_active_version_from_frontmatter():
     with tempfile.TemporaryDirectory() as tmpdir:
         skills_dir = Path(tmpdir)
         create_versioned_skill_dir(skills_dir, "coding.code-review")
@@ -714,7 +727,7 @@ def test_skill_loader_loads_current_version_from_metadata():
         skill = loader.load("coding.code-review")
 
         assert skill.id == "coding.code-review"
-        assert skill.current_version == "1.1.0"
+        assert skill.version == "1.1.0"
         assert "Active Version" in skill.content
         assert "Stale Entrypoint" not in skill.content
 
@@ -724,18 +737,23 @@ def test_skill_loader_discovers_metadata_without_archived_by_default():
         skills_dir = Path(tmpdir)
         create_versioned_skill_dir(skills_dir, "coding.code-review")
         archived = create_versioned_skill_dir(skills_dir, "old.skill")
-        (archived / "skill.yaml").write_text(
-            """id: old.skill
+        (archived / "SKILL.md").write_text(
+            """---
+id: old.skill
 name: Old Skill
 description: Old.
 scene: coding
+origin: learned
 status: archived
 created_by: agent
-current_version: 1.1.0
+version: 1.1.0
 confidence: 0.1
 risk_level: low
 triggers:
   - old
+---
+
+# Old
 """,
             encoding="utf-8",
         )
@@ -860,23 +878,29 @@ class SkillLoader:
         raise FileNotFoundError(f"Skill not found: {name}")
 
     def _load_from_dir(self, skill_dir: Path) -> SkillDef:
+        legacy_file = skill_dir / "SKILL.md"
+        if legacy_file.exists():
+            skill = SkillDef.from_file(legacy_file)
+            if skill.version:
+                version_file = skill_dir / "versions" / skill.version / "SKILL.md"
+                if version_file.exists():
+                    skill.content = version_file.read_text(encoding="utf-8").strip()
+            return skill
+
         metadata_path = skill_dir / "skill.yaml"
         if metadata_path.exists():
             return self._load_versioned_skill(skill_dir, metadata_path)
-
-        legacy_file = skill_dir / "SKILL.md"
-        if legacy_file.exists():
-            return SkillDef.from_file(legacy_file)
 
         raise FileNotFoundError(f"No skill definition found in {skill_dir}")
 
     def _load_versioned_skill(self, skill_dir: Path, metadata_path: Path) -> SkillDef:
         metadata = SkillMetadata.from_yaml_file(metadata_path)
-        version_file = skill_dir / "versions" / metadata.current_version / "SKILL.md"
+        version = metadata.version
+        version_file = skill_dir / "versions" / version / "SKILL.md" if version else skill_dir / "SKILL.md"
         if not version_file.exists():
             version_file = skill_dir / "SKILL.md"
         if not version_file.exists():
-            raise FileNotFoundError(f"Skill content not found for {metadata.id} version {metadata.current_version}")
+            raise FileNotFoundError(f"Skill content not found for {metadata.id} version {version}")
 
         content = version_file.read_text(encoding="utf-8").strip()
         data = metadata.to_dict()
@@ -942,11 +966,11 @@ def test_skill_loader_creates_new_version_without_mutating_old_version():
 
         assert "Active Version" in old_content
         assert "New Version" in new_content
-        assert active.current_version == "1.2.0"
+        assert active.version == "1.2.0"
         assert "New Version" in active.content
 
 
-def test_skill_loader_rolls_back_current_version():
+def test_skill_loader_rolls_back_active_version():
     with tempfile.TemporaryDirectory() as tmpdir:
         skills_dir = Path(tmpdir)
         create_versioned_skill_dir(skills_dir, "coding.code-review")
@@ -962,7 +986,7 @@ def test_skill_loader_rolls_back_current_version():
 
         skill = loader.load("coding.code-review")
 
-        assert skill.current_version == "1.1.0"
+        assert skill.version == "1.1.0"
         assert "Active Version" in skill.content
 
 
@@ -1016,8 +1040,8 @@ Add these methods to `SkillLoader`:
         version_dir.mkdir(parents=True)
         (version_dir / "SKILL.md").write_text(content.strip() + "\n", encoding="utf-8")
 
-        previous_version = metadata.current_version
-        metadata.current_version = version
+        previous_version = metadata.version
+        metadata.version = version
         if source_task_id:
             metadata.source_task_id = source_task_id
         metadata.write_yaml_file(metadata_path)
@@ -1045,8 +1069,8 @@ Add these methods to `SkillLoader`:
             raise FileNotFoundError(f"Skill version not found: {name}@{version}")
 
         metadata = SkillMetadata.from_yaml_file(metadata_path)
-        previous_version = metadata.current_version
-        metadata.current_version = version
+        previous_version = metadata.version
+        metadata.version = version
         metadata.write_yaml_file(metadata_path)
 
         self._append_changelog(
@@ -1236,7 +1260,7 @@ description: Review code.
 scene: coding
 status: active
 created_by: agent
-current_version: 1.0.0
+version: 1.0.0
 confidence: 0.8
 risk_level: medium
 triggers:
@@ -1279,7 +1303,7 @@ def create_skill_tool(skill_loader: SkillLoader):
     skills = skill_loader.discover_skills()
     skills_xml = "<skills>\n"
     for skill in skills:
-        version = skill.current_version or "legacy"
+        version = skill.version or "legacy"
         status = skill.status or "active"
         skills_xml += (
             f'  <skill name="{skill.name}" id="{skill.id}" '
@@ -1338,7 +1362,7 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
             return "暂无可用技能"
         lines = ["可用技能:"]
         for skill in skills:
-            version = skill.current_version or "legacy"
+            version = skill.version or "legacy"
             status = skill.status or "active"
             lines.append(f"  • `{skill.id or skill.name}` [{status}] v{version} - {skill.description}")
         return "\n".join(lines)
@@ -1347,7 +1371,7 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
         if len(args) < 2:
             return "用法: /skill show <name>"
         skill_def = loader.load(args[1])
-        version = skill_def.current_version or "legacy"
+        version = skill_def.version or "legacy"
         return f"已加载技能 [{skill_def.id or args[1]}] v{version}:\n\n{skill_def.content[:500]}..."
 
     if subcmd == "versions":
@@ -1362,7 +1386,7 @@ async def cmd_skill(context: CommandContext, args: list[str]) -> str:
         if len(args) < 3:
             return "用法: /skill rollback <name> <version>"
         skill_def = loader.rollback(args[1], args[2], reason="Manual rollback from /skill command")
-        return f"✓ 已回滚技能 `{skill_def.id or args[1]}` 到 v{skill_def.current_version}"
+        return f"✓ 已回滚技能 `{skill_def.id or args[1]}` 到 v{skill_def.version}"
 
     try:
         skill_def = loader.load(args[0])
@@ -1447,6 +1471,6 @@ These items belong to later plans and should not be implemented in this phase:
 
 - Spec coverage: This plan implements Phase 1 from `docs/superpowers/specs/2026-07-07-skill-evolution-design.md`.
 - Scope boundary: This plan does not implement task-to-skill generation, curator, or scene-agent overlays.
-- Backward compatibility: Legacy `workspace/skills/<name>/SKILL.md` skills continue to load.
-- Safety: Version history is immutable; rollback only updates `current_version`.
+- Backward compatibility: Existing `workspace/skills/<name>/SKILL.md` skills continue to load without requiring `skill.yaml`.
+- Safety: Version history is immutable; rollback only updates the active `version`.
 - Tests: All new behavior has focused pytest coverage using temporary directories.

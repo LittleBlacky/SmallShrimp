@@ -47,7 +47,11 @@ Skill content should answer:
 8. How should the result be verified?
 9. What task outcomes caused this version to exist?
 
-## Skill Directory Layout
+## Skill Package Layout
+
+SmallShrimp skills should be Markdown-first capability packages.
+
+`SKILL.md` is the only required file. It is the entrypoint the assistant reads to understand when and how to use the skill. All other files are optional assets that support indexing, versioning, execution, testing, and maintenance.
 
 The first implementation should use a file-based layout under the user workspace:
 
@@ -58,6 +62,10 @@ workspace/skills/
 │   ├── skill.yaml
 │   ├── CHANGELOG.md
 │   ├── usage.json
+│   ├── scripts/
+│   ├── references/
+│   ├── assets/
+│   ├── tests/
 │   └── versions/
 │       ├── 1.0.0/
 │       │   └── SKILL.md
@@ -73,26 +81,43 @@ workspace/skills/
     └── versions/
 ```
 
-`SKILL.md` is the active entrypoint. It should match the current active version recorded in `skill.yaml`.
+`SKILL.md` is the active entrypoint and must exist for every skill.
 
-`versions/<semver>/SKILL.md` stores immutable historical versions. Updating a skill creates a new version directory instead of overwriting historical content.
+`skill.yaml` is optional. It is useful when metadata becomes too large for frontmatter or when system-managed fields should be kept out of the human-authored instructions.
 
-`CHANGELOG.md` explains human-readable changes.
+`versions/<semver>/SKILL.md` is optional. It stores immutable historical versions when rollback is needed. Updating a versioned skill creates a new version directory instead of overwriting historical content.
 
-`usage.json` records usage and outcome data for retrieval ranking and curator decisions.
+`scripts/` is optional. It stores helper scripts referenced by relative path from `SKILL.md`.
+
+`references/` is optional. It stores longer instructions, API notes, methodology references, or examples that should not bloat the main `SKILL.md`.
+
+`assets/` is optional. It stores templates, images, document samples, and other reusable resources.
+
+`tests/` is optional. It stores examples or validation material for the skill.
+
+`CHANGELOG.md` is optional. It explains human-readable changes.
+
+`usage.json` is optional and system-managed. It records usage and outcome data for retrieval ranking and curator decisions.
 
 ## Skill Metadata
 
-`skill.yaml` should contain:
+SmallShrimp should support metadata in two forms:
+
+1. `SKILL.md` frontmatter for simple and user-authored skills.
+2. Optional `skill.yaml` for system-managed metadata, large metadata, or versioned skills.
+
+For the first implementation, frontmatter should be enough for normal skills:
 
 ```yaml
+---
 id: coding.code-review
 name: Code Review
 description: Review a local code change for bugs, regressions, missing tests, and maintainability risks.
 scene: coding
+origin: learned
 status: active
 created_by: agent
-current_version: 1.1.0
+version: 1.1.0
 source_task_id: task_20260707_001
 confidence: 0.82
 risk_level: medium
@@ -109,6 +134,7 @@ usage_count: 14
 success_count: 11
 failure_count: 1
 user_correction_count: 2
+---
 ```
 
 Required fields:
@@ -116,22 +142,33 @@ Required fields:
 1. `id`
 2. `name`
 3. `description`
-4. `scene`
-5. `status`
-6. `created_by`
-7. `current_version`
-8. `confidence`
-9. `risk_level`
-10. `triggers`
+4. `triggers`
 
 Optional fields:
 
-1. `source_task_id`
-2. `pinned`
-3. `requires_approval`
-4. `related_skills`
-5. `last_used_at`
-6. usage counters
+1. `scene`
+2. `origin`
+3. `status`
+4. `created_by`
+5. `version`
+6. `source_task_id`
+7. `confidence`
+8. `risk_level`
+9. `pinned`
+10. `requires_approval`
+11. `related_skills`
+12. `last_used_at`
+13. usage counters
+
+### Skill Origin
+
+Skill origin values:
+
+1. `user`: user-authored, imported, configured, or explicitly confirmed skills. These have the highest priority. SmallShrimp must not automatically overwrite, merge, or archive them.
+2. `learned`: skills distilled from daily tasks, reflections, user corrections, and successful workflows. These may start as drafts and can be improved by the system under the risk policy.
+3. `bundled`: built-in product skills. These provide defaults and can be overridden by user skills.
+
+`created_by` remains useful for audit history, but `origin` is the product-level ownership model.
 
 ## Version Rules
 
@@ -246,7 +283,7 @@ Responsibilities:
 6. Protect pinned or user-authored skills from automatic archival.
 7. Suggest skill improvements from recurring user corrections.
 
-The curator should only automatically modify skills with `created_by: agent`. User-authored or pinned skills require explicit approval before destructive lifecycle changes.
+The curator should only automatically modify skills with `origin: learned`. User-authored, bundled, or pinned skills require explicit approval before destructive lifecycle changes.
 
 ## Retrieval Behavior
 
@@ -321,9 +358,9 @@ Generated proposals should be readable before activation.
 
 ## Implementation Phases
 
-### Phase 1: Versioned Skill Model
+### Phase 1: Markdown-First Versioned Skill Model
 
-Add metadata, version directories, changelog handling, usage tracking, and loader support for active versions.
+Keep `SKILL.md` as the required entrypoint. Add frontmatter metadata parsing, optional `skill.yaml` support, optional version directories, changelog handling, usage tracking, and loader support for active versions.
 
 ### Phase 2: Task-to-Skill Drafting
 
@@ -346,7 +383,7 @@ Connect skill ranking to scene agents and allow private scene skills.
 Tests should cover:
 
 1. Parsing `skill.yaml`.
-2. Loading active `SKILL.md` from `current_version`.
+2. Loading active `SKILL.md` from frontmatter `version` or optional `skill.yaml` metadata.
 3. Discovering skills without loading full content.
 4. Creating a new draft skill.
 5. Creating a new version without mutating previous versions.
@@ -384,4 +421,3 @@ The design is successful when:
 4. Skill matching prefers reliable and scene-appropriate skills.
 5. Curator can prevent skill clutter without touching pinned or user-authored skills.
 6. The system reinforces SmallShrimp's product direction: task completion, user cloning, self-evolution, and user improvement.
-
