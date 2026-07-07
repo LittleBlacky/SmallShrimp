@@ -1,6 +1,6 @@
 """Skill 工具。"""
 from ..tools.decorators import tool
-from ..core.skill_loader import SkillLoader
+from ..core.definitions.skill_loader import SkillLoader
 
 def create_skill_tool(skill_loader: SkillLoader):
     """工厂函数：创建 skill 工具。"""
@@ -8,7 +8,12 @@ def create_skill_tool(skill_loader: SkillLoader):
     skills = skill_loader.discover_skills()
     skills_xml = "<skills>\n"
     for s in skills:
-        skills_xml += f'  <skill name="{s.name}">{s.description}</skill>\n'
+        version = s.version or "legacy"
+        status = s.status or "active"
+        skills_xml += (
+            f'  <skill name="{s.name}" id="{s.id}" '
+            f'version="{version}" status="{status}">{s.description}</skill>\n'
+        )
     skills_xml += "</skills>"
     
     @tool(
@@ -20,7 +25,7 @@ def create_skill_tool(skill_loader: SkillLoader):
             skill_def = skill_loader.load(skill_name)
             return skill_def.content
         except FileNotFoundError:
-            return f"Skill '{skill_name}' not found. Available skills: {[s.name for s in skill_loader.discover_skills()]}"
+            return f"Skill '{skill_name}' not found. Available skills: {skill_loader.list_skills()}"
         except Exception as e:
             return f"Error loading skill '{skill_name}': {e}"
 

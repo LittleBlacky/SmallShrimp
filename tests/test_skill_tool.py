@@ -2,7 +2,7 @@ from __future__ import annotations
 """Skill 工具测试。"""
 import tempfile
 from pathlib import Path
-from src.SmallShrimp.core.skill_loader import SkillLoader
+from src.SmallShrimp.core.definitions.skill_loader import SkillLoader
 from src.SmallShrimp.tools.skill_tool import create_skill_tool
 
 
@@ -56,6 +56,31 @@ This is the skill body.
         assert result.success
         assert "Test Skill Content" in result.content
         assert "skill body" in result.content
+
+
+def test_create_skill_tool_description_includes_standard_metadata():
+    """工具描述暴露标准 skill 元数据和可选版本状态。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skill_dir = Path(tmpdir) / "coding-review"
+        skill_dir.mkdir()
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text("""---
+name: Code Review
+description: Review local code changes.
+status: active
+version: 1.0.0
+---
+
+# Code Review
+""")
+
+        loader = SkillLoader(Path(tmpdir))
+        tool = create_skill_tool(loader)
+
+        assert 'name="Code Review"' in tool.description
+        assert 'id="coding-review"' in tool.description
+        assert 'version="1.0.0"' in tool.description
+        assert 'status="active"' in tool.description
 
 
 if __name__ == "__main__":
