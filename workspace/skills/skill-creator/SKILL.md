@@ -2,6 +2,9 @@
 id: skill-creator
 name: skill-creator
 description: 创建或更新 SmallShrimp 技能。用于设计、打包具有脚本、参考资料和资源文件的技能模块。
+origin: bundled
+status: active
+version: 1.0.0
 ---
 
 # Skill Creator
@@ -10,7 +13,15 @@ description: 创建或更新 SmallShrimp 技能。用于设计、打包具有脚
 
 ## 什么是 Skill
 
-Skill 是模块化、自包含的包，通过提供专业知识、工作流程和工具来扩展 Agent 的能力。可以把它看作是特定领域或任务的"入职指南"——将通用 Agent 转化为配备程序性知识的专用 Agent。
+Skill 是模块化、自包含的 Markdown-first 能力包，通过提供专业知识、工作流程和工具来扩展 Agent 的能力。可以把它看作是特定领域或任务的"入职指南"——将通用 Agent 转化为配备程序性知识的专用 Agent。
+
+SmallShrimp 的 Skill 规范应兼容主流 skill package 约定，不发明独立标准：
+
+- `SKILL.md` 是唯一必需入口
+- YAML frontmatter 只强制 `name` 和 `description`
+- `id`、`origin`、`status`、`version`、`triggers` 等是 SmallShrimp 可理解的可选扩展
+- `scripts/`、`references/`、`assets/`、`tests/` 是可选附加资源
+- `skill.yaml`、`usage.json`、`versions/` 是系统管理层的可选文件，不应成为用户手写 skill 的负担
 
 ### Skill 能提供什么
 
@@ -57,14 +68,14 @@ skill-name/
 └── 打包资源（可选）
     ├── scripts/       - 可执行脚本
     ├── references/    - 参考文档
-    └── assets/        - 资源文件
+    ├── assets/        - 资源文件
+    └── tests/         - 示例或验证用例
 ```
 
 ### SKILL.md 格式
 
 ```markdown
 ---
-id: skill-id
 name: Skill Name
 description: 一句话描述技能功能和触发场景
 ---
@@ -92,9 +103,12 @@ description: 一句话描述技能功能和触发场景
 ### frontmatter 编写要点
 
 - `name`：Skill 名称
-- `description**：这是主要的触发机制，帮助 Agent 理解何时使用该技能
+- `description`：这是主要的触发机制，帮助 Agent 理解何时使用该技能
   - 同时包含技能功能和使用场景
   - 所有"何时使用"信息放这里，正文只在触发后加载
+- `id`：可选，未提供时可用目录名作为稳定标识
+- `triggers`：可选，用于补充关键词匹配；不能替代 `description`
+- `origin/status/version/risk_level`：可选，供 SmallShrimp 的演化、治理和风险控制使用
 
 ### 打包资源
 
@@ -120,11 +134,7 @@ description: 一句话描述技能功能和触发场景
 
 ### 不应包含的内容
 
-Skill 应该只包含直接支持其功能的必要文件。**不要创建**额外文档：
-- README.md
-- INSTALLATION_GUIDE.md
-- CHANGELOG.md
-- 等
+Skill 应该只包含直接支持其功能的必要文件。不要为了显得完整而创建无用文档。`CHANGELOG.md`、`versions/`、`usage.json` 只有在确实需要版本管理或系统治理时才添加。
 
 ## Skill 创建流程
 
@@ -154,7 +164,6 @@ mkdir -p workspace/skills/{skill-name}
 
 ```markdown
 ---
-id: my-skill
 name: my-skill
 description: 技能描述，包含触发场景
 ---
@@ -210,6 +219,7 @@ await eventbus.publish(OutboundEvent(session_id="xxx", content="result"))
 
 - [ ] 有清晰的功能描述和触发场景
 - [ ] frontmatter 包含 name 和 description
+- [ ] 没有强制用户填写 SmallShrimp 专属扩展字段
 - [ ] 有具体的使用示例
 - [ ] 有前提条件和限制说明
 - [ ] 命名符合规范（kebab-case）

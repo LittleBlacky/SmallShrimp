@@ -49,9 +49,9 @@ Skill content should answer:
 
 ## Skill Package Layout
 
-SmallShrimp skills should be Markdown-first capability packages.
+SmallShrimp skills should follow the common Markdown-first skill package convention used by mainstream agent skill systems.
 
-`SKILL.md` is the only required file. It is the entrypoint the assistant reads to understand when and how to use the skill. All other files are optional assets that support indexing, versioning, execution, testing, and maintenance.
+`SKILL.md` is the only required file. It is the entrypoint the assistant reads to understand when and how to use the skill. Its frontmatter must stay compatible with the common convention: `name` and `description` are required; everything else is optional. SmallShrimp-specific evolution fields must be additive extensions, not a separate incompatible standard.
 
 The first implementation should use a file-based layout under the user workspace:
 
@@ -83,7 +83,7 @@ workspace/skills/
 
 `SKILL.md` is the active entrypoint and must exist for every skill.
 
-`skill.yaml` is optional. It is useful when metadata becomes too large for frontmatter or when system-managed fields should be kept out of the human-authored instructions.
+`skill.yaml` is optional. It is useful when metadata becomes too large for frontmatter or when system-managed fields should be kept out of the human-authored instructions. A normal user-authored skill must not require `skill.yaml`.
 
 `versions/<semver>/SKILL.md` is optional. It stores immutable historical versions when rollback is needed. Updating a versioned skill creates a new version directory instead of overwriting historical content.
 
@@ -106,7 +106,16 @@ SmallShrimp should support metadata in two forms:
 1. `SKILL.md` frontmatter for simple and user-authored skills.
 2. Optional `skill.yaml` for system-managed metadata, large metadata, or versioned skills.
 
-For the first implementation, frontmatter should be enough for normal skills:
+For the first implementation, frontmatter should be enough for normal skills. The minimum valid skill should look like this:
+
+```yaml
+---
+name: Code Review
+description: Review local code changes for bugs, regressions, missing tests, and maintainability risks.
+---
+```
+
+SmallShrimp can additionally understand optional fields:
 
 ```yaml
 ---
@@ -139,26 +148,28 @@ user_correction_count: 2
 
 Required fields:
 
-1. `id`
-2. `name`
-3. `description`
-4. `triggers`
+1. `name`
+2. `description`
 
 Optional fields:
 
-1. `scene`
-2. `origin`
-3. `status`
-4. `created_by`
-5. `version`
-6. `source_task_id`
-7. `confidence`
-8. `risk_level`
-9. `pinned`
-10. `requires_approval`
-11. `related_skills`
-12. `last_used_at`
-13. usage counters
+1. `id`
+2. `triggers`
+3. `scene`
+4. `origin`
+5. `status`
+6. `created_by`
+7. `version`
+8. `source_task_id`
+9. `confidence`
+10. `risk_level`
+11. `pinned`
+12. `requires_approval`
+13. `related_skills`
+14. `last_used_at`
+15. usage counters
+
+`description` remains the primary discovery and trigger surface. `triggers` may improve matching, but a skill without `triggers` is still valid.
 
 ### Skill Origin
 
@@ -360,7 +371,7 @@ Generated proposals should be readable before activation.
 
 ### Phase 1: Markdown-First Versioned Skill Model
 
-Keep `SKILL.md` as the required entrypoint. Add frontmatter metadata parsing, optional `skill.yaml` support, optional version directories, changelog handling, usage tracking, and loader support for active versions.
+Keep `SKILL.md` as the required entrypoint. Add standard frontmatter parsing, optional SmallShrimp extension fields, optional `skill.yaml` support, optional version directories, changelog handling, usage tracking, and loader support for active versions.
 
 ### Phase 2: Task-to-Skill Drafting
 
@@ -382,7 +393,7 @@ Connect skill ranking to scene agents and allow private scene skills.
 
 Tests should cover:
 
-1. Parsing `skill.yaml`.
+1. Parsing standard `SKILL.md` frontmatter with only `name` and `description` required.
 2. Loading active `SKILL.md` from frontmatter `version` or optional `skill.yaml` metadata.
 3. Discovering skills without loading full content.
 4. Creating a new draft skill.

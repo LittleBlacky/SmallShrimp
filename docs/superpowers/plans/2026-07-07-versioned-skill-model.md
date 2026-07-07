@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first phase of SmallShrimp's skill evolution system: Markdown-first skills with optional metadata, optional version history, usage tracking, rollback support when versions exist, and compatibility with existing flat `SKILL.md` skills.
+**Goal:** Build the first phase of SmallShrimp's skill evolution system: standard Markdown-first skills with optional SmallShrimp metadata, optional version history, usage tracking, rollback support when versions exist, and compatibility with existing flat `SKILL.md` skills.
 
-**Architecture:** Keep `SKILL.md` as the only required skill entrypoint. Keep the current `src/SmallShrimp/core/definitions` boundary, but split optional skill management concerns into small files: metadata parsing, usage tracking, and loader orchestration. Existing callers of `SkillDef`, `SkillLoader.discover_skills()`, `SkillLoader.load()`, and `create_skill_tool()` must continue to work.
+**Architecture:** Keep `SKILL.md` as the only required skill entrypoint. Require only standard frontmatter fields `name` and `description`; treat `id`, `triggers`, `origin`, `status`, `version`, and other SmallShrimp fields as optional extensions. Keep the current `src/SmallShrimp/core/definitions` boundary, but split optional skill management concerns into small files: metadata parsing, usage tracking, and loader orchestration. Existing callers of `SkillDef`, `SkillLoader.discover_skills()`, `SkillLoader.load()`, and `create_skill_tool()` must continue to work.
 
 **Tech Stack:** Python 3.11+, dataclasses, pathlib, yaml, pytest, `conda run -n smallshrimp`.
 
@@ -14,7 +14,8 @@
 
 - Modify: `src/SmallShrimp/core/definitions/skill_def.py`
   - Keep the legacy frontmatter parser.
-  - Extend `SkillDef` with version metadata fields while preserving existing constructor compatibility.
+  - Require only `name` and `description` for standard skills.
+  - Extend `SkillDef` with optional version metadata fields while preserving existing constructor compatibility.
 - Create: `src/SmallShrimp/core/definitions/skill_metadata.py`
   - Define `SkillMetadata`, allowed origin/status/risk values, frontmatter/YAML parsing, and serialization.
 - Create: `src/SmallShrimp/core/definitions/skill_usage.py`
@@ -99,6 +100,29 @@ def test_skill_metadata_from_yaml_file(tmp_path: Path):
     assert metadata.pinned is True
 
 
+def test_skill_metadata_minimum_standard_fields(tmp_path: Path):
+    metadata_path = tmp_path / "skill.yaml"
+    metadata_path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "Code Review",
+                "description": "Review code changes.",
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+    metadata = SkillMetadata.from_yaml_file(metadata_path)
+
+    assert metadata.name == "Code Review"
+    assert metadata.description == "Review code changes."
+    assert metadata.id == ""
+    assert metadata.triggers == []
+    assert metadata.origin == "user"
+    assert metadata.status == "active"
+
+
 def test_skill_metadata_requires_core_fields(tmp_path: Path):
     metadata_path = tmp_path / "skill.yaml"
     metadata_path.write_text("id: missing-fields\n", encoding="utf-8")
@@ -109,7 +133,6 @@ def test_skill_metadata_requires_core_fields(tmp_path: Path):
     except ValueError as exc:
         assert "name" in str(exc)
         assert "description" in str(exc)
-        assert "triggers" in str(exc)
 
 
 def test_skill_metadata_to_dict_roundtrip():
@@ -165,19 +188,17 @@ SkillCreatedBy = Literal["agent", "user", "bundled"]
 SkillOrigin = Literal["user", "learned", "bundled"]
 
 REQUIRED_METADATA_FIELDS = (
-    "id",
     "name",
     "description",
-    "triggers",
 )
 
 
 @dataclass
 class SkillMetadata:
-    id: str
     name: str
     description: str
-    triggers: list[str]
+    id: str = ""
+    triggers: list[str] = field(default_factory=list)
     scene: str | None = None
     origin: SkillOrigin = "user"
     status: SkillStatus = "active"
@@ -228,9 +249,9 @@ class SkillMetadata:
             raise ValueError("Skill metadata triggers must be a list")
 
         return cls(
-            id=str(data["id"]),
             name=str(data["name"]),
             description=str(data["description"]),
+            id=str(data.get("id", "") or ""),
             triggers=[str(trigger) for trigger in triggers],
             scene=str(data["scene"]) if data.get("scene") is not None else None,
             origin=origin,
@@ -339,6 +360,22 @@ Review the change.
     assert skill.confidence == 0.9
     assert skill.risk_level == "medium"
     assert skill.triggers == ["review"]
+
+
+def test_skill_def_parses_standard_minimum_frontmatter():
+    content = """---
+name: Code Review
+description: Review code changes.
+---
+
+# Code Review
+"""
+    skill = SkillDef._parse(content)
+
+    assert skill.id == ""
+    assert skill.name == "Code Review"
+    assert skill.description == "Review code changes."
+    assert skill.triggers is None
 
 
 def test_skill_def_to_dict_includes_metadata_when_present():
@@ -1472,5 +1509,6 @@ These items belong to later plans and should not be implemented in this phase:
 - Spec coverage: This plan implements Phase 1 from `docs/superpowers/specs/2026-07-07-skill-evolution-design.md`.
 - Scope boundary: This plan does not implement task-to-skill generation, curator, or scene-agent overlays.
 - Backward compatibility: Existing `workspace/skills/<name>/SKILL.md` skills continue to load without requiring `skill.yaml`.
+- Standards compatibility: A `SKILL.md` with only `name` and `description` frontmatter is valid.
 - Safety: Version history is immutable; rollback only updates the active `version`.
 - Tests: All new behavior has focused pytest coverage using temporary directories.
