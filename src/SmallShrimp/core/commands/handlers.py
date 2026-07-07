@@ -2,7 +2,7 @@
 from typing import TYPE_CHECKING
 
 from .registry import register_command
-from ..skill_loader import SkillLoader
+from ..definitions.skill_loader import SkillLoader
 from ..memory import MemoryManager
 
 if TYPE_CHECKING:
@@ -34,16 +34,36 @@ class CommandContext:
         self._memory_manager = create_memory_manager(config or {})
         return self._memory_manager
 
-@register_command(name="skill", description="加载技能内容", usage="/skill <name>")
+@register_command(name="skill", description="加载和管理技能内容", usage="/skill <list|show|name>")
 async def cmd_skill(context: CommandContext, args: list[str]) -> str:
-    """加载技能命令。"""
-    if not args:
-        return "用法: /skill <name>"
-    skill_name = args[0]
+    """加载和管理技能命令。"""
     loader = SkillLoader()
+    if not args:
+        return "用法: /skill <list|show|name> [name]"
+
+    subcmd = args[0].lower()
+    if subcmd == "list":
+        skills = loader.discover_skills()
+        if not skills:
+            return "暂无可用技能"
+        lines = ["可用技能:"]
+        for skill in skills:
+            version = skill.version or "legacy"
+            status = skill.status or "active"
+            lines.append(f"  • `{skill.id or skill.name}` [{status}] v{version} - {skill.name}: {skill.description}")
+        return "\n".join(lines)
+
+    if subcmd == "show":
+        if len(args) < 2:
+            return "用法: /skill show <name>"
+        skill_name = args[1]
+    else:
+        skill_name = args[0]
+
     try:
         skill_def = loader.load(skill_name)
-        return f"已加载技能 [{skill_name}]:\n\n{skill_def.content[:200]}..."
+        version = skill_def.version or "legacy"
+        return f"已加载技能 [{skill_def.id or skill_name}] v{version}:\n\n{skill_def.content[:500]}..."
     except Exception as e:
         return f"技能 [{skill_name}] 不存在: {e}"
 

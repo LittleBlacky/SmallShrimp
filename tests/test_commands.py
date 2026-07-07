@@ -156,7 +156,7 @@ def test_command_registry_dispatch():
 def test_cmd_compact_uses_context_guard_pipeline():
     """测试 /compact 走当前 ContextGuard 统一压缩入口。"""
     from src.SmallShrimp.core.commands.handlers import CommandContext, cmd_compact
-    from src.SmallShrimp.core.message import HumanMessage
+    from src.SmallShrimp.core.runtime.message import HumanMessage
 
     class FakeGuard:
         token_threshold = 100
@@ -188,6 +188,59 @@ def test_cmd_compact_uses_context_guard_pipeline():
     assert guard.calls == 1
     assert "tokens: 120 -> 40 / 100" in result
     assert "messages: 2 -> 1" in result
+
+
+def test_cmd_skill_lists_markdown_skills(tmp_path, monkeypatch):
+    """测试 /skill list 展示标准 Markdown-first skills。"""
+    from src.SmallShrimp.core.commands.handlers import cmd_skill
+
+    skills_dir = tmp_path / "workspace" / "skills" / "coding-review"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        """---
+name: Code Review
+description: Review local code changes.
+version: 1.0.0
+---
+
+# Code Review
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = asyncio.run(cmd_skill(SimpleNamespace(), ["list"]))
+
+    assert "coding-review" in result
+    assert "Code Review" in result
+    assert "v1.0.0" in result
+
+
+def test_cmd_skill_shows_markdown_skill(tmp_path, monkeypatch):
+    """测试 /skill show 加载标准 Markdown-first skill 正文。"""
+    from src.SmallShrimp.core.commands.handlers import cmd_skill
+
+    skills_dir = tmp_path / "workspace" / "skills" / "coding-review"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        """---
+name: Code Review
+description: Review local code changes.
+---
+
+# Code Review
+
+Review the current diff.
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = asyncio.run(cmd_skill(SimpleNamespace(), ["show", "coding-review"]))
+
+    assert "coding-review" in result
+    assert "Code Review" in result
+    assert "Review the current diff" in result
 
 
 if __name__ == "__main__":
