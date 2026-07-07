@@ -7,9 +7,9 @@ from re import Pattern
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..core.events import EventSource
-    from ..server.context import Context
-    from ..utils.config import Config
+    from .events import EventSource
+    from ...server.context import Context
+    from ...utils.config import Config
 
 
 @dataclass
@@ -82,7 +82,7 @@ class RoutingTable:
         # Resolve agent and create new session
         agent_id = self.resolve(source_str)
         agent_def = self.context.agent_loader.load(agent_id)
-        from ..core.agent import Agent
+        from ..runtime.agent import Agent
 
         agent = Agent(
             agent_def,
@@ -99,7 +99,7 @@ class RoutingTable:
         )
 
         # Cache the session
-        from ..utils.config import SourceSessionConfig
+        from ...utils.config import SourceSessionConfig
         self.config.set_runtime(
             f"sources.{source_str}",
             SourceSessionConfig(session_id=session.session_id),

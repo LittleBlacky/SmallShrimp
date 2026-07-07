@@ -2,7 +2,7 @@ from __future__ import annotations
 """Trust Dialog 测试。"""
 import os, tempfile, json
 from pathlib import Path
-from src.SmallShrimp.core.trust import TrustManager
+from src.SmallShrimp.core.security.trust import TrustManager
 
 
 def test_new_dir_not_trusted():

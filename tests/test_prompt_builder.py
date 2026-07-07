@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """多层提示词测试 - SOUL.md + PromptBuilder + 会话集成。"""
 import tempfile
 from pathlib import Path
@@ -6,12 +6,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from src.SmallShrimp.core.prompt_builder import PromptBuilder
-from src.SmallShrimp.core.session_state import SessionState
-from src.SmallShrimp.core.events import CliEventSource
+from src.SmallShrimp.core.context.prompt_builder import PromptBuilder
+from src.SmallShrimp.core.runtime.session_state import SessionState
+from src.SmallShrimp.core.events.events import CliEventSource
 from src.SmallShrimp.utils.config import Config
 from src.SmallShrimp.utils.def_loader import AgentDef
-from src.SmallShrimp.core.agent_loader import AgentLoader
+from src.SmallShrimp.core.definitions.agent_loader import AgentLoader
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +317,4 @@ def _fake_agent(agent_def: AgentDef):
         llm: object
 
     return FakeAgent(agent_def=agent_def, llm=FakeLLM())
+

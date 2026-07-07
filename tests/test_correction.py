@@ -1,6 +1,6 @@
 from __future__ import annotations
 """Correction detection 测试。"""
-from src.SmallShrimp.core.correction import (
+from src.SmallShrimp.core.learning.correction import (
     detect_correction,
     detect_correction_structural,
     detect_correction_combined,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 """Message 类测试。"""
-from src.SmallShrimp.core.message import (
+from src.SmallShrimp.core.runtime.message import (
     SystemMessage, HumanMessage, AssistantMessage, ToolMessage
 )
 

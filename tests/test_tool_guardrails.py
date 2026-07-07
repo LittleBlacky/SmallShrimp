@@ -1,6 +1,6 @@
 from __future__ import annotations
 """Tool guardrail 测试。"""
-from src.SmallShrimp.core.tool_guardrails import (
+from src.SmallShrimp.core.security.tool_guardrails import (
     ToolCallGuardrailController,
     GuardrailConfig,
     append_guardrail_warning,

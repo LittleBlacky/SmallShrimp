@@ -2,7 +2,7 @@ from __future__ import annotations
 """Agent 加载器测试。"""
 import tempfile
 from pathlib import Path
-from src.SmallShrimp.core.agent_loader import AgentLoader
+from src.SmallShrimp.core.definitions.agent_loader import AgentLoader
 
 
 def create_agent_dir(parent: Path, name: str, content: str) -> Path:

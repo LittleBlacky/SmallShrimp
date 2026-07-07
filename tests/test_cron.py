@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """Cron 定时任务测试。"""
 import tempfile
 from pathlib import Path
@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.SmallShrimp.core.cron_loader import CronDef, CronLoader, find_due_jobs
-from src.SmallShrimp.core.events import CronEventSource
+from src.SmallShrimp.core.definitions.cron_loader import CronDef, CronLoader, find_due_jobs
+from src.SmallShrimp.core.events.events import CronEventSource
 
 
 def test_cron_def_from_file():
@@ -262,3 +262,4 @@ if __name__ == "__main__":
     test_cron_event_source()
     test_cron_event_source_from_string()
     print("\nAll test_cron tests passed!")
+

@@ -1,6 +1,6 @@
 from __future__ import annotations
 """Shell guard — tree-sitter AST tests."""
-from src.SmallShrimp.core.shell_guard import check_shell_command, parse_command
+from src.SmallShrimp.core.security.shell_guard import check_shell_command, parse_command
 
 
 def test_parse_simple():

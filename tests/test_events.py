@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """事件类测试。"""
 import time
 import pytest
-from src.SmallShrimp.core.events import (
+from src.SmallShrimp.core.events.events import (
     Event, InboundEvent, OutboundEvent, serialize_event, deserialize_event,
     EventSource, CliEventSource
 )

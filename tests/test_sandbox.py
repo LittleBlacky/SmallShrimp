@@ -1,7 +1,7 @@
 from __future__ import annotations
 """Sandbox isolation tests."""
 import platform
-from src.SmallShrimp.core.sandbox import (
+from src.SmallShrimp.core.security.sandbox import (
     execute_sandboxed,
     SandboxConfig,
     _clean_env,

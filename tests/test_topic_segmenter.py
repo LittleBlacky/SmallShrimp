@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import pytest
-from src.SmallShrimp.core.topic_segmenter import TopicSegmenter, _tokenize, _jaccard_sim
+from src.SmallShrimp.core.context.topic_segmenter import TopicSegmenter, _tokenize, _jaccard_sim
 
 
 class TestTopicDetectionStrategies:

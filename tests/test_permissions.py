@@ -1,7 +1,7 @@
 from __future__ import annotations
 """Permission system 测试。"""
 import tempfile, os, json
-from src.SmallShrimp.core.permissions import (
+from src.SmallShrimp.core.security.permissions import (
     PermissionChecker, PermissionMode, PermissionResult,
     PermissionRules, PermissionRule,
     validate_path, set_workspace_boundary,

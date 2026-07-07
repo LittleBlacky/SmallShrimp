@@ -310,3 +310,6 @@ def append_guardrail_warning(result: str, decision: GuardrailDecision) -> str:
 def guardrail_synthetic_result(decision: GuardrailDecision) -> str:
     """为被 block/halt 的工具调用生成合成结果。"""
     return f"[Tool blocked: {decision.code}; {decision.message}]"
+
+
+ToolGuardrailController = ToolCallGuardrailController

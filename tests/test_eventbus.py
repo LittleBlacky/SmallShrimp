@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """事件总线测试。"""
 import asyncio
 import pytest
-from src.SmallShrimp.core.events import Event, OutboundEvent, InboundEvent, CliEventSource
+from src.SmallShrimp.core.events.events import Event, OutboundEvent, InboundEvent, CliEventSource
 
 
 def test_event_base():
@@ -36,7 +36,7 @@ def test_outbound_event_with_error():
 
 def test_event_serialization_roundtrip():
     """测试事件序列化往返。"""
-    from src.SmallShrimp.core.events import serialize_event, deserialize_event
+    from src.SmallShrimp.core.events.events import serialize_event, deserialize_event
 
     source = CliEventSource()
     original = OutboundEvent(session_id="sess-001", source=source, content="test content")
@@ -50,7 +50,7 @@ def test_event_serialization_roundtrip():
 
 def test_event_unknown_type():
     """测试未知事件类型反序列化。"""
-    from src.SmallShrimp.core.events import deserialize_event
+    from src.SmallShrimp.core.events.events import deserialize_event
 
     data = {"type": "UnknownEvent", "session_id": "sess-001"}
     with pytest.raises(ValueError):
@@ -60,7 +60,7 @@ def test_event_unknown_type():
 @pytest.mark.asyncio
 async def test_eventbus_initialization():
     """测试事件总线初始化。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     assert bus._queue is not None
@@ -70,7 +70,7 @@ async def test_eventbus_initialization():
 @pytest.mark.asyncio
 async def test_eventbus_subscribe():
     """测试订阅事件。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     call_count = []
@@ -86,7 +86,7 @@ async def test_eventbus_subscribe():
 @pytest.mark.asyncio
 async def test_eventbus_multiple_handlers():
     """测试多个处理器。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     counts = {"handler1": 0, "handler2": 0}
@@ -106,7 +106,7 @@ async def test_eventbus_multiple_handlers():
 @pytest.mark.asyncio
 async def test_eventbus_publish_and_dispatch():
     """测试发布和分发事件。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     received = []
@@ -138,7 +138,7 @@ async def test_eventbus_publish_and_dispatch():
 @pytest.mark.asyncio
 async def test_eventbus_filtered_dispatch():
     """测试事件过滤分发。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     received_outbound = []
@@ -173,7 +173,7 @@ async def test_eventbus_filtered_dispatch():
 @pytest.mark.asyncio
 async def test_eventbus_multiple_events():
     """测试多个事件处理。"""
-    from src.SmallShrimp.core.eventbus import EventBus
+    from src.SmallShrimp.core.events.eventbus import EventBus
 
     bus = EventBus()
     received = []
@@ -213,3 +213,4 @@ if __name__ == "__main__":
     asyncio.run(test_eventbus_multiple_events())
 
     print("\nAll test_eventbus tests passed!")
+

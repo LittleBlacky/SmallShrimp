@@ -113,7 +113,12 @@ class PermissionRules:
 
 # ── Layer 5: Path validation ─────────────────────────────
 
-def validate_path(path: str, workspace_root: str | None = None) -> str | None:
+def validate_path(
+    path: str,
+    workspace_root: str | None = None,
+    *,
+    use_global_boundary: bool = True,
+) -> str | None:
     """Validate a file path for writes. Returns error message or None."""
     if not path:
         return "Empty path"
@@ -124,7 +129,9 @@ def validate_path(path: str, workspace_root: str | None = None) -> str | None:
             return f"Protected path: {path} matches {pattern}"
 
     # Workspace boundary check
-    ws = workspace_root or _WORKSPACE_BOUNDARY
+    ws = workspace_root if workspace_root is not None else (
+        _WORKSPACE_BOUNDARY if use_global_boundary else None
+    )
     if ws:
         ws_abs = str(Path(ws).resolve())
         try:
@@ -138,7 +145,7 @@ def validate_path(path: str, workspace_root: str | None = None) -> str | None:
     return None
 
 
-def set_workspace_boundary(path: str) -> None:
+def set_workspace_boundary(path: str | None) -> None:
     global _WORKSPACE_BOUNDARY
     _WORKSPACE_BOUNDARY = path
 
@@ -157,6 +164,7 @@ class PermissionChecker:
         self.mode = mode
         self.rules = rules or PermissionRules()
         self.workspace_root = workspace_root
+        self._enforce_global_workspace = workspace_root is not None
         self._confirmed_paths: set[str] = set()
 
     def reset(self) -> None:
@@ -167,13 +175,17 @@ class PermissionChecker:
 
         # ── Layer 5: Path validation for write tools ──
         if tool_name in CONFIRM_TOOLS and path:
-            err = validate_path(path, self.workspace_root)
+            err = validate_path(
+                path,
+                self.workspace_root,
+                use_global_boundary=self._enforce_global_workspace,
+            )
             if err:
                 return PermissionResult(action="deny", message=err)
 
         # ── Layer 4: Shell command guard ──
         if tool_name == "shell":
-            from ..core.shell_guard import check_shell_command
+            from .shell_guard import check_shell_command
             cmd = args.get("command", "")
             if cmd:
                 check = check_shell_command(cmd)

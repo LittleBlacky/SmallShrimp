@@ -2,12 +2,12 @@ from __future__ import annotations
 """ContextGuard 测试。"""
 import pytest
 from unittest.mock import MagicMock
-from src.SmallShrimp.core.context_guard import ContextGuard
+from src.SmallShrimp.core.context.context_guard import ContextGuard
 
 
 def test_context_guard_init():
     """测试 ContextGuard 初始化。"""
-    from src.SmallShrimp.core.context_guard import ContextGuard
+    from src.SmallShrimp.core.context.context_guard import ContextGuard
 
     guard = ContextGuard(token_threshold=100000)
     assert guard.token_threshold == 100000
@@ -15,7 +15,7 @@ def test_context_guard_init():
 
 def test_context_guard_default_threshold():
     """测试默认阈值。"""
-    from src.SmallShrimp.core.context_guard import ContextGuard
+    from src.SmallShrimp.core.context.context_guard import ContextGuard
 
     guard = ContextGuard()
     assert guard.token_threshold == 160000  # 80% of 200k
@@ -23,7 +23,7 @@ def test_context_guard_default_threshold():
 
 def test_budget_truncate_large_results():
     """测试 Budget 截断大工具结果（Tier 1）。"""
-    from src.SmallShrimp.core.message import HumanMessage, ToolMessage
+    from src.SmallShrimp.core.runtime.message import HumanMessage, ToolMessage
 
     guard = ContextGuard(context_window=10000)
 
@@ -42,7 +42,7 @@ def test_budget_truncate_large_results():
 
 def test_snip_under_threshold_noop():
     """Snip: 低于 60% 不触发。"""
-    from src.SmallShrimp.core.message import ToolMessage
+    from src.SmallShrimp.core.runtime.message import ToolMessage
 
     guard = ContextGuard(context_window=100000)
     messages = [ToolMessage(content="small", tool_call_id="c1", name="read")]
@@ -53,8 +53,8 @@ def test_snip_under_threshold_noop():
 @pytest.mark.asyncio
 async def test_check_and_compact_under_threshold():
     """测试未超阈值时直接返回。"""
-    from src.SmallShrimp.core.context_guard import ContextGuard
-    from src.SmallShrimp.core.message import HumanMessage, AssistantMessage
+    from src.SmallShrimp.core.context.context_guard import ContextGuard
+    from src.SmallShrimp.core.runtime.message import HumanMessage, AssistantMessage
 
     guard = ContextGuard(token_threshold=100000)
 

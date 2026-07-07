@@ -78,7 +78,7 @@ def test_context_dataclass_manual():
 
 def test_context_agent_receives_memory_manager_in_prompt(workspace_tmp):
     """Context 创建的 Agent 必须共享 memory_manager，否则 User Profile 不会进入 prompt。"""
-    from src.SmallShrimp.core.agent import Agent
+    from src.SmallShrimp.core.runtime.agent import Agent
     from src.SmallShrimp.server.context import Context
 
     _write_minimal_workspace(workspace_tmp)

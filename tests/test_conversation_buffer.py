@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from src.SmallShrimp.core.conversation_buffer import ConversationBuffer, TurnRecord
+from src.SmallShrimp.core.context.conversation_buffer import ConversationBuffer, TurnRecord
 
 
 class TestBufferTurnManagement:

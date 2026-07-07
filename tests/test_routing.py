@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from src.SmallShrimp.core.routing import Binding, RoutingTable
+from src.SmallShrimp.core.events.routing import Binding, RoutingTable
 
 
 def test_binding_exact_match_tier():

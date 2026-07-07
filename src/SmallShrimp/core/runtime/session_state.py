@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING, Optional
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..core.agent import Agent
-    from ..core.events import EventSource
-    from ..core.history import HistoryManager
-    from ..core.prompt_builder import PromptBuilder
+    from .agent import Agent
+    from ..events.events import EventSource
+    from ..history import HistoryManager
+    from ..context.prompt_builder import PromptBuilder
 
 from datetime import datetime
 
-from ..core.message import Message, HumanMessage, AssistantMessage, SystemMessage
+from .message import Message, HumanMessage, AssistantMessage, SystemMessage
 
 
 def _clip_utf8(text: str, max_bytes: int, *, from_end: bool = False) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 """Failure learning 测试。"""
 import tempfile
 import os
-from src.SmallShrimp.core.failure_learning import FailureLearner, fingerprint_error
+from src.SmallShrimp.core.learning.failure_learning import FailureLearner, fingerprint_error
 
 
 def test_fingerprint_same_error():
