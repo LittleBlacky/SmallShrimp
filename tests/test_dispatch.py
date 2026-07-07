@@ -1,13 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """Agent 调度测试。"""
 import asyncio
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.SmallShrimp.core.events import (
+from src.SmallShrimp.core.events.events import (
     AgentEventSource, DispatchEvent, DispatchResultEvent,
     CliEventSource, InboundEvent,
 )
+from src.SmallShrimp.core.hooks import HookManager, HookPoint, HookResult
 
 
 def test_agent_event_source_str():
@@ -75,7 +77,7 @@ def test_event_serialization_roundtrip():
 async def test_agent_worker_handles_dispatch_event():
     """AgentWorker 订阅并处理 DispatchEvent。"""
     from src.SmallShrimp.server.workers.agent import AgentWorker
-    from src.SmallShrimp.core.events import DispatchEvent, AgentEventSource
+    from src.SmallShrimp.core.events.events import DispatchEvent, AgentEventSource
 
     context = MagicMock()
     context.eventbus = MagicMock()
@@ -136,8 +138,9 @@ async def test_subagent_tool_creates_tool_when_agents_available():
 
 @pytest.mark.asyncio
 async def test_subagent_dispatch_tool_publishes_event():
-    """subagent_dispatch 发布 DispatchEvent 并等待 DispatchResultEvent。"""
+    """subagent_dispatch 直接调用子 Agent run_once。"""
     from src.SmallShrimp.tools.subagent_tool import create_subagent_dispatch_tool
+    from src.SmallShrimp.core.runtime.agent import AgentResult
 
     context = MagicMock()
     context.agent_loader.discover_agents = MagicMock(return_value=[
@@ -145,44 +148,179 @@ async def test_subagent_dispatch_tool_publishes_event():
         MagicMock(id="cookie", name="cookie", description="Memory manager"),
     ])
     context.agent_loader.load = MagicMock(return_value=MagicMock(
-        id="cookie", name="cookie", llm={"provider": "openai"},
+        id="cookie", name="cookie", llm={"provider": "openai", "model": "openai/gpt-5.5"},
     ))
     context.config = MagicMock()
     context.config.data = {}
+    context.config.get_default_provider = MagicMock(return_value="openai")
+    context.config.get_provider_config = MagicMock(return_value={
+        "api_key": "test-key",
+        "api_base": "https://example.test/v1",
+    })
+    context.config.on_change = MagicMock()
     context.tool_registry = MagicMock()
     context.tool_registry.get_schemas = MagicMock(return_value=[])
     context.history_manager = MagicMock()
+    context.prompt_builder = None
+    context.memory_manager = None
     context.eventbus = MagicMock()
-    context.eventbus.publish = AsyncMock()
-    context.eventbus.subscribe = MagicMock()
-    context.eventbus.unsubscribe = MagicMock()
-
-    # 模拟 Agent 响应：发布 DispatchResultEvent
-    async def mock_publish(event):
-        if isinstance(event, DispatchEvent):
-            result = DispatchResultEvent(
-                session_id=event.session_id,
-                source=AgentEventSource(agent_id="cookie"),
-                content="已记住用户偏好",
-            )
-            # 手动触发 handler
-            for call in context.eventbus.subscribe.call_args_list:
-                event_type, handler = call[0]
-                if event_type == DispatchResultEvent:
-                    await handler(result)
-
-    context.eventbus.publish.side_effect = mock_publish
 
     tool = create_subagent_dispatch_tool("pickle", context)
 
-    session = MagicMock()
+    from types import SimpleNamespace
+
+    session = SimpleNamespace()
     session.session_id = "main-session"
 
-    result = await tool.call(agent_id="cookie", task="记住用户偏好 Python", session=session)
+    with patch("src.SmallShrimp.core.runtime.agent.AgentSession.run_once", new_callable=AsyncMock) as run_once:
+        run_once.return_value = AgentResult(
+            text="已记住用户偏好",
+            input_tokens=10,
+            output_tokens=5,
+            session_id="sub-session",
+        )
+
+        result = await tool.call(agent_id="cookie", task="记住用户偏好 Python", session=session)
 
     assert "已记住用户偏好" in result.content
-    context.eventbus.publish.assert_called()
-    context.eventbus.unsubscribe.assert_called()
+    run_once.assert_awaited_once()
+    assert session._subagent_tokens == 15
+
+
+@pytest.mark.asyncio
+async def test_subagent_dispatch_emits_started_and_completed_hooks():
+    """subagent_dispatch emits lifecycle hooks around run_once."""
+    from src.SmallShrimp.tools.subagent_tool import create_subagent_dispatch_tool
+    from src.SmallShrimp.core.runtime.agent import AgentResult
+
+    context = MagicMock()
+    context.agent_loader.discover_agents = MagicMock(return_value=[
+        MagicMock(id="pickle", name="pickle"),
+        MagicMock(id="cookie", name="cookie", description="Memory manager"),
+    ])
+    context.agent_loader.load = MagicMock(return_value=MagicMock(
+        id="cookie", name="cookie", llm={"provider": "openai", "model": "openai/gpt-5.5"},
+    ))
+    context.config = MagicMock()
+    context.config.data = {}
+    context.config.get_default_provider = MagicMock(return_value="openai")
+    context.config.get_provider_config = MagicMock(return_value={
+        "api_key": "test-key",
+        "api_base": "https://example.test/v1",
+    })
+    context.config.on_change = MagicMock()
+    context.tool_registry = MagicMock()
+    context.tool_registry.get_schemas = MagicMock(return_value=[])
+    context.history_manager = MagicMock()
+    context.prompt_builder = None
+    context.memory_manager = None
+
+    tool = create_subagent_dispatch_tool("pickle", context)
+    session = SimpleNamespace()
+    session.session_id = "main-session"
+    session.state = MagicMock()
+    session.agent = MagicMock()
+    session.agent.agent_def = MagicMock(id="pickle", name="pickle")
+    session.hooks = HookManager()
+    seen = []
+
+    async def record(ctx):
+        seen.append(ctx)
+        return HookResult.observe()
+
+    session.hooks.register(HookPoint.SUBAGENT_STARTED, record, name="started")
+    session.hooks.register(HookPoint.SUBAGENT_COMPLETED, record, name="completed")
+
+    with patch("src.SmallShrimp.core.runtime.agent.AgentSession.run_once", new_callable=AsyncMock) as run_once:
+        run_once.return_value = AgentResult(
+            text="done",
+            input_tokens=10,
+            output_tokens=5,
+            session_id="sub-session",
+        )
+
+        result = await tool.call(agent_id="cookie", task="记住用户偏好 Python", session=session)
+
+    assert "done" in result.content
+    assert [ctx.hook_point for ctx in seen] == [
+        HookPoint.SUBAGENT_STARTED,
+        HookPoint.SUBAGENT_COMPLETED,
+    ]
+    assert seen[0].session_id == "main-session"
+    assert seen[0].agent_id == "pickle"
+    assert seen[0].state is session.state
+    assert seen[0].metadata == {
+        "subagent_id": "cookie",
+        "task": "记住用户偏好 Python",
+        "agent_type": "general",
+    }
+    assert seen[1].metadata == {
+        "subagent_id": "cookie",
+        "task": "记住用户偏好 Python",
+        "agent_type": "general",
+        "subagent_session_id": "sub-session",
+        "input_tokens": 10,
+        "output_tokens": 5,
+    }
+    run_once.assert_awaited_once()
+    assert session._subagent_tokens == 15
+
+
+@pytest.mark.asyncio
+async def test_subagent_hook_failure_does_not_break_successful_dispatch():
+    """subagent_dispatch succeeds even when observe-only hooks fail."""
+    from src.SmallShrimp.tools.subagent_tool import create_subagent_dispatch_tool
+    from src.SmallShrimp.core.runtime.agent import AgentResult
+
+    context = MagicMock()
+    context.agent_loader.discover_agents = MagicMock(return_value=[
+        MagicMock(id="pickle", name="pickle"),
+        MagicMock(id="cookie", name="cookie", description="Memory manager"),
+    ])
+    context.agent_loader.load = MagicMock(return_value=MagicMock(
+        id="cookie", name="cookie", llm={"provider": "openai", "model": "openai/gpt-5.5"},
+    ))
+    context.config = MagicMock()
+    context.config.data = {}
+    context.config.get_default_provider = MagicMock(return_value="openai")
+    context.config.get_provider_config = MagicMock(return_value={
+        "api_key": "test-key",
+        "api_base": "https://example.test/v1",
+    })
+    context.config.on_change = MagicMock()
+    context.tool_registry = MagicMock()
+    context.tool_registry.get_schemas = MagicMock(return_value=[])
+    context.history_manager = MagicMock()
+    context.prompt_builder = None
+    context.memory_manager = None
+
+    tool = create_subagent_dispatch_tool("pickle", context)
+    session = SimpleNamespace()
+    session.session_id = "main-session"
+    session.state = MagicMock()
+    session.agent = MagicMock()
+    session.agent.agent_def = MagicMock(id="pickle", name="pickle")
+    session.hooks = HookManager()
+
+    async def broken(ctx):
+        raise RuntimeError("hook failed")
+
+    session.hooks.register(HookPoint.SUBAGENT_STARTED, broken, name="broken_started", critical=True)
+    session.hooks.register(HookPoint.SUBAGENT_COMPLETED, broken, name="broken_completed", critical=True)
+
+    with patch("src.SmallShrimp.core.runtime.agent.AgentSession.run_once", new_callable=AsyncMock) as run_once:
+        run_once.return_value = AgentResult(
+            text="done",
+            input_tokens=10,
+            output_tokens=5,
+            session_id="sub-session",
+        )
+
+        result = await tool.call(agent_id="cookie", task="记住用户偏好 Python", session=session)
+
+    assert "done" in result.content
+    run_once.assert_awaited_once()
+    assert session._subagent_tokens == 15
 
 
 if __name__ == "__main__":
@@ -196,3 +334,4 @@ if __name__ == "__main__":
     asyncio.run(test_subagent_tool_creates_tool_when_agents_available())
     asyncio.run(test_subagent_dispatch_tool_publishes_event())
     print("\nAll test_dispatch tests passed!")
+

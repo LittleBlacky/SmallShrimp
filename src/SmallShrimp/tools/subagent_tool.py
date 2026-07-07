@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..core.agent import AgentSession
+    from ..core.runtime.agent import AgentSession
     from ..server.context import Context
     from ..tools.base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 def create_subagent_dispatch_tool(
@@ -58,7 +61,7 @@ def create_subagent_dispatch_tool(
 
         # 加载目标 Agent
         agent_def = _ctx.agent_loader.load(agent_id)
-        from ..core.agent import Agent
+        from ..core.runtime.agent import Agent
 
         sub_agent = Agent(
             agent_def,
@@ -77,9 +80,28 @@ def create_subagent_dispatch_tool(
         if agent_type not in valid_types:
             agent_type = "general"
 
+        await _run_subagent_hook(
+            session,
+            "started",
+            subagent_id=agent_id,
+            task=task,
+            agent_type=agent_type,
+        )
+
         result = await sub_session.run_once(
             user_message,
             agent_type=agent_type,
+        )
+
+        await _run_subagent_hook(
+            session,
+            "completed",
+            subagent_id=agent_id,
+            task=task,
+            agent_type=agent_type,
+            subagent_session_id=result.session_id,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
         )
 
         # Aggregate tokens into parent session's usage
@@ -96,3 +118,37 @@ def create_subagent_dispatch_tool(
         }, ensure_ascii=False)
 
     return subagent_dispatch
+
+
+async def _run_subagent_hook(session: "AgentSession", event: str, **metadata) -> None:
+    hooks = getattr(session, "hooks", None)
+    if hooks is None:
+        return
+
+    from ..core.hooks import HookContext, HookPoint
+
+    hook_point = (
+        HookPoint.SUBAGENT_STARTED
+        if event == "started"
+        else HookPoint.SUBAGENT_COMPLETED
+    )
+    try:
+        await hooks.run(HookContext(
+            hook_point=hook_point,
+            session_id=session.session_id,
+            agent_id=_session_agent_id(session),
+            state=session.state,
+            metadata=metadata,
+        ))
+    except Exception:
+        logger.exception("Subagent %s hook dispatch failed", event)
+
+
+def _session_agent_id(session: "AgentSession") -> str:
+    agent = getattr(session, "agent", None)
+    agent_def = getattr(agent, "agent_def", None)
+    return (
+        getattr(agent_def, "id", None)
+        or getattr(agent_def, "name", None)
+        or ""
+    )
